@@ -3,8 +3,8 @@
 ```yaml
 ---
 doc_id: "contract_brain_stem"
-last_updated: "2026-02-22"
-contract_version: "0.2.0"
+last_updated: "2026-03-03"
+contract_version: "0.3.0"
 parent_contract: "contract_hub"
 ---
 ```
@@ -19,7 +19,7 @@ parent_contract: "contract_hub"
 
 - **Mirror repo:** brainstem-docs
 
-- **Implementation state:** phase_1
+- **Implementation state:** phase_2
 
 - **Last mirror sync:** 
 
@@ -27,7 +27,7 @@ parent_contract: "contract_hub"
 
 - **Last known good commit:** 
 
-- **Last change:** v0.2.0 — §3 split, §3.5 interfaces added (formerly MOD-005)
+- **Last change:** v0.3.0 — §13 updated to as-built (Phase 1 Complete, Phase 2 Live), §7 fix route status updated
 
 ---
 
@@ -429,7 +429,7 @@ Note: PRO runs extraction-only (no classification), then auto-files to Projects 
 
 - **Destination:** Updates original Inbox Log + refiling
 
-- **Implementation:** Scaffolded (Phase 2)
+- **Implementation:** ✅ Live (Phase 2) — fix: handler operational across all 5 destination routes with original record deletion, re-extraction via Claude, Inbox Log update, linked record management, and Slack confirmation. Conditional typed-field PATCHes on main and fix routes.
 
 ---
 
@@ -673,17 +673,31 @@ Note: PRO runs extraction-only (no classification), then auto-files to Projects 
 
 - [Perplexity] API integration configured (§3b)
 
-**Phase 1:** Brain Dump Capture — *In Progress*
+**Phase 1:** Brain Dump Capture — *Complete*
 
 - [[Make.com](http://make.com/)] PRO route: Extraction working — guarantees Projects destination, Claude extracts fields (§7 PRO Route, §3.5 Extraction Interface)
 
 - [[Make.com](http://make.com/)] BD route: Classification + extraction working (§7 BD Route, §3.5 Classification Interface)
 
-- CAL, R, fix routes: Scaffolded as placeholders (§7 Route Semantics)
+- [Airtable] Inbox Log and all destination table writes operational (§9, §10, §3.5 Storage Interface)
 
-- [Airtable] Inbox Log and Projects table writes operational (§9, §10, §3.5 Storage Interface)
+**Phase 2:** Classification & Routing — *Live as of Feb 26, 2026*
 
-**Phase 2–9:** Not yet implemented
+- [[Make.com](http://make.com/)] fix: handler operational across all 5 destination routes (People, Projects, Ideas, Admin, Events)
+
+- Original record deletion, re-extraction via Claude, Inbox Log update (Status=Fixed), linked record management, Slack confirmation
+
+- Conditional typed-field PATCHes on main BD routes and fix routes (dates, single selects)
+
+- Unfurl prevention on all Slack reply modules
+
+- Classifier prompt updated with date resolution (`now` pill)
+
+- CAL, R routes: Still scaffolded (§7 Route Semantics)
+
+- Deferred: Few-shot calibration, weekly misclassification digest, OpenRouter fallback, error handling on fix route
+
+**Phase 3–9:** Not yet implemented
 
 ---
 
@@ -693,6 +707,7 @@ Note: PRO runs extraction-only (no classification), then auto-files to Projects 
 
 | **Version** | **Date** | **Description** |
 | --- | --- | --- |
+| 0.3.0 | 2026-03-03 | §13 updated to as-built: Phase 1 marked Complete, Phase 2 marked Live (fix: handler, typed-field guards, unfurl prevention). §7 fix route updated from Scaffolded to Live. Minor version bump — no interface changes, additive status update only. |
 | 0.2.0 | 2026-02-22 | §3 split into Functional Pipeline (§3a) + Provider Mapping (§3b). §3.5 Interface Definitions added. §15 Change Control expanded with version bump rules and downstream sync deadline. Formerly MOD-005. |
 | 0.1.0 | 2026-02-18 | Initial contract. Pipeline architecture, route semantics, data contracts, LLM contracts, invariants. Adopted v0.2.0 structural standard (YAML headers, §-numbering). Formerly MOD-001. |
 
@@ -773,6 +788,8 @@ If a downstream doc cannot be updated in the same session, add this banner at th
 - [Phase 0: Setup & Configuration](https://www.notion.so/ed998ca8e6464de188987fbf06e30568)
 
 - [Phase 1: Brain Dump Capture](https://www.notion.so/0538979e023a46528fb1a70b60ccd4ef)
+
+- [Phase 2: Classification & Routing](https://www.notion.so/548d362076b243f1ad33df72fd6617a1)
 
 - [Brain Stem Architecture & Flows](https://www.notion.so/8d45305a868d4e73a6555b9e96d53a18)
 
