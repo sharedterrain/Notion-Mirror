@@ -14,6 +14,7 @@ Required env vars:
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 import requests
 
@@ -68,7 +69,7 @@ def fetch_export_scope() -> list:
                 print(f"  SKIP — missing page_id or path for row: {name!r}")
                 continue
 
-            pages.append({"name": name, "page_id": page_id, "path": path})
+            pages.append({"name": name, "page_id": page_id, "path": path, "row_id": row["id"]})
 
         if data.get("has_more"):
             payload["start_cursor"] = data["next_cursor"]
@@ -79,6 +80,18 @@ def fetch_export_scope() -> list:
 
 
 # ── Notion API helpers ────────────────────────────────────────────────────────
+
+def update_mirror_status(row_id: str, status: str) -> None:
+    """Write Mirror Status and Last Mirrored back to the Export Scope Mapping row."""
+    url = f"https://api.notion.com/v1/pages/{row_id}"
+    payload = {
+        "properties": {
+            "Mirror Status": {"select": {"name": status}},
+            "Last Mirrored": {"date": {"start": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}}
+        }
+    }
+    requests.patch(url, headers=HEADERS, json=payload)
+
 
 def fetch_page_title(page_id: str) -> str:
     url = f"https://api.notion.com/v1/pages/{page_id}"
@@ -281,6 +294,7 @@ def main():
         page_id = entry["page_id"]
         path = entry["path"]
         name = entry["name"]
+        row_id = entry["row_id"]
         print(f"  → {name}  ({path})")
 
         try:
@@ -292,15 +306,18 @@ def main():
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(md_content, encoding="utf-8")
             print(f"     ✓ {out_path.relative_to(REPO_ROOT)}")
+            update_mirror_status(row_id, "Current")
 
         except requests.HTTPError as e:
             msg = f"HTTP {e.response.status_code} — {page_id} ({name})"
             print(f"     ✗ {msg}", file=sys.stderr)
             errors.append(msg)
+            update_mirror_status(row_id, "Failed")
         except Exception as e:
             msg = f"Error — {page_id} ({name}): {e}"
             print(f"     ✗ {msg}", file=sys.stderr)
             errors.append(msg)
+            update_mirror_status(row_id, "Failed")
 
     if errors:
         print(f"\n{len(errors)} error(s):")
