@@ -74,7 +74,7 @@ This page defines what must never be published and maintains a registry of all p
 | `<<SLACK_BOT_TOKEN>>` | `xoxb-...` | Phase 0, Slack connection | 90 days |  | Device-only |
 | `<<SLACK_SIGNING_SECRET>>` | `********` | Phase 0, verification | 90 days |  | Never publish |
 | `<<PERPLEXITY_API_KEY>>` | `pplx-...` | Phase 3, research | 90 days |  | Device-only |
-| `<<NOTION_TOKEN>>` | `secret_...` | Git mirror automation | 90 days |  | Device-only |
+| `<<NOTION_TOKEN>>` | `secret_...` | Git mirror automation (Make + GitHub Actions) | 90 days |  | Device-only + GitHub Secret (`NOTION_API_TOKEN`) in sharedterrain/notion-mirror |
 | `<<GITHUB_TOKEN>>` | `github_pat_...` | Git mirror automation | 90 days | 2026-02-24 | Expires May 25, 2026. Device-only |
 
 ---
