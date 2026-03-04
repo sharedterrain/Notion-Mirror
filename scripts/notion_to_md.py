@@ -10,9 +10,14 @@ Writes Mirror Status (Current/Failed) and Last Mirrored back to each
 mapping row on completion. Staleness detection is handled separately
 by check_staleness.py.
 
+Filters by VISIBILITY environment variable:
+  - "Public"  — process only rows where Visibility = Public (default)
+  - "Private" — process only rows where Visibility = Private
+
 Required env vars:
   NOTION_API_TOKEN          — Notion integration token
   NOTION_EXPORT_SCOPE_DB_ID — optional override; defaults to known DB ID
+  VISIBILITY                — "Public" or "Private" (default: Public)
 """
 
 import os
@@ -33,6 +38,8 @@ EXPORT_SCOPE_DB_ID = os.environ.get(
     "NOTION_EXPORT_SCOPE_DB_ID", "38f8657d2479419599377864111fea70"
 )
 
+VISIBILITY = os.environ.get("VISIBILITY", "Public")
+
 NOTION_VERSION = "2022-06-28"
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -46,9 +53,16 @@ REPO_ROOT = Path(__file__).parent.parent
 # ── Export Scope query ────────────────────────────────────────────────────────
 
 def fetch_export_scope() -> list:
-    """Query the Export Scope Mapping DB for all active rows."""
+    """Query the Export Scope Mapping DB for active rows matching VISIBILITY."""
     url = f"https://api.notion.com/v1/databases/{EXPORT_SCOPE_DB_ID}/query"
-    payload = {"filter": {"property": "Active", "checkbox": {"equals": True}}}
+    payload = {
+        "filter": {
+            "and": [
+                {"property": "Active", "checkbox": {"equals": True}},
+                {"property": "Visibility", "select": {"equals": VISIBILITY}},
+            ]
+        }
+    }
     pages = []
 
     while True:
@@ -298,11 +312,11 @@ def blocks_to_md(blocks: list) -> str:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("Querying Export Scope Mapping DB...")
+    print(f"Querying Export Scope Mapping DB (Visibility={VISIBILITY})...")
     pages = fetch_export_scope()
 
     if not pages:
-        print("No active pages found — nothing to convert.")
+        print(f"No active {VISIBILITY} pages found — nothing to convert.")
         return
 
     print(f"Converting {len(pages)} pages...")
