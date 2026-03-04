@@ -6,8 +6,9 @@ Queries the Notion "Export Scope Mapping" database for active rows,
 fetches block content for each page (with full pagination),
 converts to clean Markdown, and writes .md files to the repo.
 
+Skips pages where last_edited_time has not changed since Last Mirrored.
 Writes Mirror Status (Current/Failed) and Last Mirrored back to each
-mapping row on completion. Staleness detection is handled separately
+mapping row on completion. Staleness flagging is handled separately
 by check_staleness.py.
 
 Filters by VISIBILITY environment variable:
@@ -83,11 +84,19 @@ def fetch_export_scope() -> list:
             match = re.search(r"([a-f0-9]{32})$", source_url)
             page_id = match.group(1) if match else ""
 
+            last_mirrored = (props.get("Last Mirrored", {}).get("date") or {}).get("start", "")
+
             if not page_id or not path:
                 print(f"  SKIP — missing page_id or path for row: {name!r}")
                 continue
 
-            pages.append({"name": name, "page_id": page_id, "path": path, "row_id": row["id"]})
+            pages.append({
+                "name": name,
+                "page_id": page_id,
+                "path": path,
+                "row_id": row["id"],
+                "last_mirrored": last_mirrored,
+            })
 
         if data.get("has_more"):
             payload["start_cursor"] = data["next_cursor"]
@@ -111,16 +120,23 @@ def update_mirror_status(row_id: str, status: str) -> None:
     requests.patch(url, headers=HEADERS, json=payload)
 
 
-def fetch_page_title(page_id: str) -> str:
+def fetch_page_metadata(page_id: str) -> dict:
+    """Fetch page title and last_edited_time."""
     url = f"https://api.notion.com/v1/pages/{page_id}"
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
-    props = r.json().get("properties", {})
+    data = r.json()
+
+    props = data.get("properties", {})
+    title = page_id
     for prop in props.values():
         if prop.get("type") == "title":
             parts = prop.get("title", [])
-            return "".join(p.get("plain_text", "") for p in parts)
-    return page_id
+            title = "".join(p.get("plain_text", "") for p in parts)
+            break
+
+    last_edited = data.get("last_edited_time", "")
+    return {"title": title, "last_edited_time": last_edited}
 
 
 def fetch_blocks(block_id: str) -> list:
@@ -319,18 +335,30 @@ def main():
         print(f"No active {VISIBILITY} pages found — nothing to convert.")
         return
 
-    print(f"Converting {len(pages)} pages...")
+    print(f"Found {len(pages)} active {VISIBILITY} pages...")
     errors = []
+    skipped = 0
+    converted = 0
 
     for entry in pages:
         page_id = entry["page_id"]
         path = entry["path"]
         name = entry["name"]
         row_id = entry["row_id"]
+        last_mirrored = entry["last_mirrored"]
         print(f"  → {name}  ({path})")
 
         try:
-            title = fetch_page_title(page_id)
+            metadata = fetch_page_metadata(page_id)
+            last_edited = metadata["last_edited_time"]
+            title = metadata["title"]
+
+            # Skip if unchanged since last mirror
+            if last_mirrored and last_edited <= last_mirrored:
+                print(f"     ↩ unchanged — skipping")
+                skipped += 1
+                continue
+
             blocks = fetch_blocks(page_id)
             md_content = f"# {title}\n\n{blocks_to_md(blocks)}"
 
@@ -339,6 +367,7 @@ def main():
             out_path.write_text(md_content, encoding="utf-8")
             print(f"     ✓ {out_path.relative_to(REPO_ROOT)}")
             update_mirror_status(row_id, "Current")
+            converted += 1
 
         except requests.HTTPError as e:
             msg = f"HTTP {e.response.status_code} — {page_id} ({name})"
@@ -351,13 +380,12 @@ def main():
             errors.append(msg)
             update_mirror_status(row_id, "Failed")
 
+    print(f"\nDone — {converted} converted, {skipped} unchanged, {len(errors)} failed.")
+
     if errors:
-        print(f"\n{len(errors)} error(s):")
         for e in errors:
             print(f"  - {e}")
         sys.exit(1)
-    else:
-        print("\nAll pages converted successfully.")
 
 
 if __name__ == "__main__":
