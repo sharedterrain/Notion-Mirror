@@ -25,26 +25,81 @@ Open Brain is a semantic memory layer that stores vector embeddings of every cap
 
 ## 2. Architecture Overview
 
+### 2.1 Memory Topology
+
+The deployed system uses a **three-memory architecture**. Two are semantic vector stores (Supabase + pgvector); one is local filesystem state. Each instance uses the same codebase pattern (§3–5) but is deployed as an independent Supabase project with its own credentials.
+
+```plain text
+┌──────────────────────────────────────────────────────────────────┐
+│                    THREE-MEMORY TOPOLOGY                         │
+│                                                                  │
+│  ┌─────────────────────────┐  ┌─────────────────────────┐       │
+│  │  JEDI'S OPEN BRAIN      │  │  MAGI BRAIN             │       │
+│  │  (shared semantic store) │  │  (Magi-exclusive store) │       │
+│  │                          │  │                          │       │
+│  │  Writers:                │  │  Writer:                 │       │
+│  │   • Brain Stem (Make)    │  │   • Magi only            │       │
+│  │   • Magi (OpenClaw)      │  │                          │       │
+│  │                          │  │  Reader:                 │       │
+│  │  Readers:                │  │   • Magi only            │       │
+│  │   • Magi (OpenClaw)      │  │                          │       │
+│  │   • Claude Desktop/Code  │  │  Content:                │       │
+│  │   • Any MCP client       │  │   • Cross-session        │       │
+│  │                          │  │     operational patterns  │       │
+│  │  Content:                │  │   • Learned behaviors     │       │
+│  │   • Brain Stem captures  │  │   • Magi's own context    │       │
+│  │   • Decisions & insights │  │                          │       │
+│  │   • People, projects,    │  │  Functions:              │       │
+│  │     events, ideas, admin │  │   • magi-brain-ingest    │       │
+│  │                          │  │   • magi-brain-mcp       │       │
+│  │  Functions:              │  │                          │       │
+│  │   • ingest-thought       │  │  Instance:               │       │
+│  │   • open-brain-mcp       │  │   <<MAGI_BRAIN_REF>>     │       │
+│  │                          │  │                          │       │
+│  │  Instance:               │  └─────────────────────────┘       │
+│  │   <<SUPABASE_PROJECT_REF>>│                                    │
+│  └─────────────────────────┘                                     │
+│                                                                  │
+│  ┌─────────────────────────┐                                     │
+│  │  OPENCLAW LOCAL MEMORY  │  Not a Supabase instance.           │
+│  │  (filesystem state)     │  Included for completeness.         │
+│  │                          │                                     │
+│  │  • MEMORY.md (curated)  │                                     │
+│  │  • memory/YYYY-MM-DD.md │                                     │
+│  │  • No network required  │                                     │
+│  └─────────────────────────┘                                     │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 Pattern vs Instance
+
+This document serves two purposes:
+
+1. **Reusable pattern** — §3 (schema), §4 (ingest function), §5 (MCP function) describe a generic semantic memory instance. Fork these sections to stand up additional brains.
+
+1. **Instance registry** — §6A documents the two deployed Supabase instances and their roles.
+
+### 2.3 Single-Instance Data Flow (applies to each brain)
+
 ```plain text
 ┌─────────────────────────────────────────────────────────────┐
 │                     WRITE PATH (Ingest)                      │
 │                                                              │
-│  Brain Stem (Make.com)──┐                                    │
-│    POST after each       ├──→ Supabase Edge Function         │
-│    destination route     │    "ingest-thought"                │
-│                          │      │                             │
-│  Magi (OpenClaw)────────┘      ├─→ OpenRouter embedding      │
-│    store_thought tool          ├─→ INSERT into thoughts table │
-│                                └─→ Return {id, status}       │
+│  Callers ────────────────→ Supabase Edge Function            │
+│    POST with text +         "ingest-thought" (or variant)    │
+│    metadata                   │                              │
+│                               ├─→ OpenRouter embedding       │
+│                               ├─→ INSERT into thoughts table │
+│                               └─→ Return {id, status}        │
 │                                                              │
 ├──────────────────────────────────────────────────────────────┤
 │                     READ PATH (Retrieval)                     │
 │                                                              │
-│  Magi (OpenClaw)──────────→ Supabase Edge Function           │
-│    search_brain tool          "open-brain-mcp"               │
+│  Callers ────────────────→ Supabase Edge Function            │
+│    MCP or curl                "*-mcp" endpoint               │
 │                                 │                             │
-│  Claude Desktop/Code──────→     ├─→ search_thoughts (semantic)│
-│    MCP config                   ├─→ recent_thoughts (time)    │
+│                                 ├─→ search_thoughts (semantic)│
+│                                 ├─→ recent_thoughts (time)    │
 │                                 └─→ brain_stats (counts)      │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
@@ -378,6 +433,29 @@ Deno.serve(async (req: Request) => {
 }
 ```
 
+## 6A. Instance Registry
+
+Two Supabase instances are deployed. Both use the identical schema (§3.2), matching function (§3.2), and RLS policy (§3.2). The Edge Functions follow the same patterns (§4–5) with instance-specific naming.
+
+| **Instance** | **Project Ref** | **Ingest Function** | **MCP Function** | **Access Key Env Var** | **Writers** | **Readers** |
+| --- | --- | --- | --- | --- | --- | --- |
+| Jedi's Open Brain (shared) | `<<SUPABASE_PROJECT_REF>>` | `ingest-thought` | `open-brain-mcp` | `<<OPEN_BRAIN_ACCESS_KEY>>` | Brain Stem (Make), Magi | Magi, Claude Desktop/Code, any MCP client |
+| Magi Brain (Magi-exclusive) | `<<MAGI_BRAIN_REF>>` | `magi-brain-ingest` | `magi-brain-mcp` | `<<MAGI_BRAIN_ACCESS_KEY>>` | Magi only | Magi only |
+
+**Jedi's Open Brain** stores shared knowledge: Brain Stem captures (people, projects, ideas, admin, events), Magi's decisions and insights, and any manual entries. Multiple systems write and read.
+
+**Magi Brain** stores Magi's private operational memory: cross-session patterns, learned behaviors, tool usage observations, and operational context that only Magi needs. No external writers or readers. This is Magi's equivalent of institutional knowledge — what it has learned about how things work across sessions.
+
+**Metadata differentiation:**
+
+- Jedi's Open Brain: `metadata.source` distinguishes writers (`brain_stem`, `brain_stem_fix`, `magi`, `manual`)
+
+- Magi Brain: `metadata.source` is always `magi-brain` — instance isolation provides the access boundary, not metadata filtering
+
+**Key design principle:** Instance isolation over metadata filtering. Rather than storing everything in one database and filtering by source, each actor class gets its own Supabase project. This provides credential-level access control without complex RLS policies.
+
+---
+
 ## 6. Brain Stem Integration (Make.com)
 
 **What:** Add one HTTP POST module at the tail end of each Brain Stem destination route, after the Inbox Log PATCH completes. This is a fire-and-forget push — Brain Stem does not wait for or act on the Open Brain response.
@@ -524,76 +602,97 @@ All `record_id` pills confirmed. Main create modules: People (65), Projects (73)
 
 ## 7. Magi/OpenClaw Integration
 
-### 7.1 MCP Tool Registration
+Magi accesses **both** Supabase brains (see §6A). Access is via `curl` wrapped in `/bin/zsh -c '...'` subshells — environment variables for brain keys are only available in zsh (loaded from keychain via `~/.zshenv`). This is by design.
 
-Add to OpenClaw's MCP configuration (or tool config, depending on how Magi's tools are registered):
+### 7.1 Dual-Brain MCP Registration
 
 ```json
 {
   "mcpServers": {
     "open-brain": {
       "type": "http",
-      "url": "https://[PROJECT_REF].supabase.co/functions/v1/open-brain-mcp",
+      "url": "https://<<SUPABASE_PROJECT_REF>>.supabase.co/functions/v1/open-brain-mcp",
       "headers": {
         "x-brain-key": "<<OPEN_BRAIN_ACCESS_KEY>>"
+      }
+    },
+    "magi-brain": {
+      "type": "http",
+      "url": "https://<<MAGI_BRAIN_REF>>.supabase.co/functions/v1/magi-brain-mcp",
+      "headers": {
+        "x-brain-key": "<<MAGI_BRAIN_ACCESS_KEY>>"
       }
     }
   }
 }
 ```
 
-This gives Magi access to `search_thoughts`, `recent_thoughts`, and `brain_stats` automatically.
+Both servers expose the same three tools (`search_thoughts`, `recent_thoughts`, `brain_stats`). Magi must search **both** at session start — a search of one does not search the other.
 
-### 7.2 Direct Ingest Tool (store_thought)
+### 7.2 Dual-Brain Write Routing
 
-If OpenClaw supports custom HTTP tools outside MCP, add a direct tool definition for writing:
+Magi writes to both brains. The routing rule is based on content type, not volume:
+
+| **Content type** | **Target brain** | **metadata.source** | **Example** |
+| --- | --- | --- | --- |
+| Decisions made with Jedidiah | Jedi's Open Brain | `magi` | "Decided to use n8n for Phase 3 orchestration" |
+| Action items assigned | Jedi's Open Brain | `magi` | "Deploy [livingsystems.earth](http://livingsystems.earth/) by end of week" |
+| Project insights | Jedi's Open Brain | `magi` | "Brain Stem fix route handles multi-subject edge case" |
+| People/events/things worth retrieving | Jedi's Open Brain | `magi` | "Sarah from sustainability conf — regen ag tech" |
+| Operational patterns learned | Magi Brain | `magi-brain` | "Make formula fields don't evaluate in Parse JSON modules" |
+| Tool usage observations | Magi Brain | `magi-brain` | "OpenClaw allow-always doesn't persist for Supabase domain" |
+| Cross-session operational context | Magi Brain | `magi-brain` | "WHC deploy requires explicit credential provisioning" |
+
+**Rule of thumb:** If Jedidiah or another system would benefit from retrieving it → Jedi's Open Brain. If only Magi would ever need it → Magi Brain. Don't duplicate across systems.
+
+### 7.3 Direct Ingest (store_thought)
+
+If OpenClaw supports custom HTTP tools outside MCP, add direct tool definitions for both brains:
+
+**Jedi's Open Brain:**
 
 ```yaml
 name: store_thought
-description: Store a thought, decision, or insight in Jedidiah's Open Brain for long-term semantic retrieval.
-endpoint: https://[PROJECT_REF].supabase.co/functions/v1/ingest-thought
+description: Store a thought, decision, or insight in Jedidiah's Open Brain for shared semantic retrieval.
+endpoint: https://<<SUPABASE_PROJECT_REF>>.supabase.co/functions/v1/ingest-thought
 method: POST
 headers:
   x-brain-key: "<<OPEN_BRAIN_ACCESS_KEY>>"
   Content-Type: "application/json"
 body_schema:
-  text: string (required) — the content to store
+  text: string (required)
   metadata:
     source: "magi" (always)
     type: "decision|action_item|insight|context|note"
-    topic: string (optional — project or subject name)
+    topic: string (optional)
     session_id: string (optional)
 ```
 
-If OpenClaw only supports MCP tools, add a fourth tool (`store_thought`) to the MCP server that accepts text + metadata and calls the ingest function internally.
+**Magi Brain:**
 
-### 7.3 Bootstrap File Additions
-
-Add to Magi's `AGENTS.md` or equivalent bootstrap instructions:
-
-```markdown
-## Semantic Memory (Open Brain)
-
-You have access to Jedidiah's Open Brain — a persistent semantic memory store.
-
-### When to SEARCH (search_thoughts):
-- At session start: search for context related to the current topic
-- When Jedidiah references past work, decisions, or people
-- When you need context beyond your current session transcript
-- Before making recommendations that should account for prior decisions
-
-### When to STORE (store_thought):
-- Decisions made during this session (type: "decision")
-- Action items assigned (type: "action_item")
-- Key insights or realizations (type: "insight")
-- Context that future sessions will need (type: "context")
-- Do NOT store: casual conversation, greetings, troubleshooting back-and-forth
-
-### Metadata conventions:
-- Always set source: "magi"
-- Always set type to one of: decision, action_item, insight, context, note
-- Set topic to the project name when applicable (e.g., "brain_stem", "open_brain", "regenerative_consulting")
+```yaml
+name: store_magi_thought
+description: Store an operational pattern, learned behavior, or Magi-specific context in Magi Brain.
+endpoint: https://<<MAGI_BRAIN_REF>>.supabase.co/functions/v1/magi-brain-ingest
+method: POST
+headers:
+  x-brain-key: "<<MAGI_BRAIN_ACCESS_KEY>>"
+  Content-Type: "application/json"
+body_schema:
+  text: string (required)
+  metadata:
+    source: "magi-brain" (always)
 ```
+
+### 7.4 Bootstrap File Reference
+
+Magi's `AGENTS.md` defines the full session start ritual and write routing rules. The authoritative version is maintained in Magi's workspace (see Memory section of [AGENTS.md](http://agents.md/)). Key points:
+
+- **Session start:** Query both brains for context relevant to the current session topic
+
+- **Write discipline:** Don't store operational noise in either Supabase brain; don't duplicate across systems
+
+- **Access pattern:** All brain curl commands must be wrapped in `/bin/zsh -c '...'` — keys are not available in the base exec environment
 
 ## 8. Build Sequence
 
@@ -619,16 +718,28 @@ Execute in this order. Each step is independently testable.
 ## 9. Credential Tracker
 
 ```plain text
-=== OPEN BRAIN CREDENTIALS ===
-Supabase Project Ref: ________________
-Supabase Project URL: https://________________.supabase.co
-Supabase DB Password: ________________
-Supabase Service Role Key: ________________ (auto-available in Edge Functions)
-OpenRouter API Key: ________________
-MCP Access Key: ________________ (generated via openssl rand -hex 32)
-Ingest URL: https://________________.supabase.co/functions/v1/ingest-thought
-MCP URL: https://________________.supabase.co/functions/v1/open-brain-mcp
+=== JEDI'S OPEN BRAIN CREDENTIALS ===
+Supabase Project Ref: <<SUPABASE_PROJECT_REF>>
+Supabase Project URL: https://<<SUPABASE_PROJECT_REF>>.supabase.co
+Supabase DB Password: <<OPEN_BRAIN_DB_PASSWORD>>
+Supabase Service Role Key: (auto-available in Edge Functions)
+OpenRouter API Key: <<OPENROUTER_API_KEY>>
+MCP Access Key: <<OPEN_BRAIN_ACCESS_KEY>> (generated via openssl rand -hex 32)
+Ingest URL: https://<<SUPABASE_PROJECT_REF>>.supabase.co/functions/v1/ingest-thought
+MCP URL: https://<<SUPABASE_PROJECT_REF>>.supabase.co/functions/v1/open-brain-mcp
+
+=== MAGI BRAIN CREDENTIALS ===
+Supabase Project Ref: <<MAGI_BRAIN_REF>>
+Supabase Project URL: https://<<MAGI_BRAIN_REF>>.supabase.co
+Supabase DB Password: <<MAGI_BRAIN_DB_PASSWORD>>
+Supabase Service Role Key: (auto-available in Edge Functions)
+OpenRouter API Key: <<OPENROUTER_API_KEY>> (shared — same OpenRouter account)
+MCP Access Key: <<MAGI_BRAIN_ACCESS_KEY>> (generated via openssl rand -hex 32)
+Ingest URL: https://<<MAGI_BRAIN_REF>>.supabase.co/functions/v1/magi-brain-ingest
+MCP URL: https://<<MAGI_BRAIN_REF>>.supabase.co/functions/v1/magi-brain-mcp
 ```
+
+Each instance has its own Supabase project, DB password, and MCP access key. The OpenRouter API key is shared across both (same account, same billing).
 
 ## 10. Security Notes
 
