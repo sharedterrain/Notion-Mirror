@@ -1315,20 +1315,20 @@ Add two **Text Parser > Replace** modules between the Claude API module and Pars
 
 **Primary routes (off router 30):**
 
-| **Route** | **text field** | **destination** | **source** | **confidence** | **record_id** |
-| --- | --- | --- | --- | --- | --- |
-| People | `55.data.name + 55.data.context` | people | brain_stem | `55.confidence` | `65.data.id` |
-| Projects | `55.data.name + 55.data.next_action + 55.data.notes` | projects | brain_stem | `55.confidence` | projects create module |
-| Ideas | `55.data.name + 55.data.one_liner + 55.data.notes` | ideas | brain_stem | `55.confidence` | ideas create module |
-| Admin | `55.data.name + 55.data.notes` | admin | brain_stem | `55.confidence` | admin create module |
-| Events | `55.data.name + 55.data.attendees + 55.data.location + 55.data.notes` | events | brain_stem | `55.confidence` | events create module |
-| Needs Review | `21.clean_text` | needs_review | brain_stem | `55.confidence` | — |
+| **Module #** | **Route** | **text field** | **destination** | **source** | **confidence** | **record_id** |
+| --- | --- | --- | --- | --- | --- | --- |
+| 275 | People | `55.data.name + 55.data.context` | people | brain_stem | `55.confidence` | `65.data.id` |
+| 276 | Projects | `55.data.name + 55.data.next_action + 55.data.notes` | projects | brain_stem | `55.confidence` | `73.data.id` |
+| 279 | Ideas | `55.data.name + 55.data.one_liner + 55.data.notes` | ideas | brain_stem | `55.confidence` | `75.data.id` |
+| 278 | Admin | `55.data.name + 55.data.notes` | admin | brain_stem | `55.confidence` | `76.data.id` |
+| 277 | Events | `55.data.name + 55.data.attendees + 55.data.location + 55.data.notes` | events | brain_stem | `55.confidence` | `77.data.id` |
+| 288 | Needs Review | `21.clean_text` | needs_review | brain_stem | `55.confidence` | — |
 
 **PRO bypass route:**
 
-| **Route** | **text field** | **destination** | **source** | **confidence** | **prefix** | **record_id** |
-| --- | --- | --- | --- | --- | --- | --- |
-| PRO bypass | `7.clean_text` | projects | brain_stem | 1.0 | PRO: | `15.data.id` |
+| **Module #** | **Route** | **text field** | **destination** | **source** | **confidence** | **prefix** | **record_id** |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 289 | PRO bypass | `7.clean_text` | projects | brain_stem | 1.0 | PRO: | `15.data.id` |
 
 All primary route modules use `classified_name: 55.data.name`. PRO bypass uses `classified_name` from the PRO extraction output.
 
