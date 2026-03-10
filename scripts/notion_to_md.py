@@ -6,9 +6,13 @@ Queries the Notion "Export Scope Mapping" database for active rows,
 fetches block content for each page (with full pagination),
 converts to clean Markdown, and writes .md files to the repo.
 
-Skips pages where last_edited_time has not changed since Last Mirrored.
-Writes Mirror Status (Current/Failed) and Last Mirrored back to each
-mapping row on completion. Staleness flagging is handled separately
+Skips pages where last_edited_time has not changed since Last Mirrored,
+UNLESS Last Mirrored Visibility differs from current VISIBILITY — in that
+case the page is force-converted regardless of timestamp (Visibility change
+detection). Stale copy cleanup in the old repo is a manual step.
+
+Writes Mirror Status, Last Mirrored, and Last Mirrored Visibility back to
+each mapping row on completion. Staleness flagging is handled separately
 by check_staleness.py.
 
 Filters by VISIBILITY environment variable:
@@ -86,6 +90,10 @@ def fetch_export_scope() -> list:
 
             last_mirrored = (props.get("Last Mirrored", {}).get("date") or {}).get("start", "")
 
+            last_mirrored_visibility = (
+                (props.get("Last Mirrored Visibility", {}).get("select") or {}).get("name", "")
+            )
+
             if not page_id or not path:
                 print(f"  SKIP — missing page_id or path for row: {name!r}")
                 continue
@@ -96,6 +104,7 @@ def fetch_export_scope() -> list:
                 "path": path,
                 "row_id": row["id"],
                 "last_mirrored": last_mirrored,
+                "last_mirrored_visibility": last_mirrored_visibility,
             })
 
         if data.get("has_more"):
@@ -109,12 +118,13 @@ def fetch_export_scope() -> list:
 # ── Notion API helpers ────────────────────────────────────────────────────────
 
 def update_mirror_status(row_id: str, status: str) -> None:
-    """Write Mirror Status and Last Mirrored back to the Export Scope Mapping row."""
+    """Write Mirror Status, Last Mirrored, and Last Mirrored Visibility to the ESM row."""
     url = f"https://api.notion.com/v1/pages/{row_id}"
     payload = {
         "properties": {
             "Mirror Status": {"select": {"name": status}},
             "Last Mirrored": {"date": {"start": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}},
+            "Last Mirrored Visibility": {"select": {"name": VISIBILITY}},
         }
     }
     requests.patch(url, headers=HEADERS, json=payload)
@@ -346,6 +356,7 @@ def main():
         name = entry["name"]
         row_id = entry["row_id"]
         last_mirrored = entry["last_mirrored"]
+        last_mirrored_visibility = entry["last_mirrored_visibility"]
         print(f"  → {name}  ({path})")
 
         try:
@@ -353,8 +364,19 @@ def main():
             last_edited = metadata["last_edited_time"]
             title = metadata["title"]
 
-            # Skip if unchanged since last mirror
-            if last_mirrored and last_edited <= last_mirrored:
+            # Detect Visibility change — force conversion if Visibility has changed
+            # since last mirror, regardless of content timestamp.
+            # Note: stale copy cleanup in the old repo is a manual step.
+            visibility_changed = (
+                last_mirrored_visibility != ""
+                and last_mirrored_visibility != VISIBILITY
+            )
+
+            if visibility_changed:
+                print(f"     ⚠ Visibility changed ({last_mirrored_visibility} → {VISIBILITY}) — forcing conversion")
+
+            # Skip if unchanged since last mirror (and no Visibility change)
+            elif last_mirrored and last_edited <= last_mirrored:
                 print(f"     ↩ unchanged — skipping")
                 skipped += 1
                 continue
