@@ -1,4 +1,4 @@
-# contracts/spec (Brain Stem)
+# contracts/spec (Brain-Stem)
 
 **Machine-readable specification for Brain Stem**
 

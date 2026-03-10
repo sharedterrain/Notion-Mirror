@@ -1,4 +1,4 @@
-# Security & Placeholders (Brain Stem)
+# Security & Placeholders (Brain-Stem)
 
 **Security rules and placeholder registry**
 

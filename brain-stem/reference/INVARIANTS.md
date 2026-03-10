@@ -1,4 +1,4 @@
-# Invariants & Checks (Brain Stem)
+# Invariants & Checks (Brain-Stem)
 
 **System invariants and validation rules**
 

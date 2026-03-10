@@ -1,4 +1,4 @@
-# CONTRACT (Brain Stem)
+# CONTRACT (Brain-Stem)
 
 ```yaml
 ---
