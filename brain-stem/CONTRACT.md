@@ -27,7 +27,7 @@ parent_contract: "contract_hub"
 
 - **Last known good commit:** 
 
-- **Last change:** v0.4.0 — §2 added Supabase/Open Brain as external dependency. §3b added Semantic Memory provider row. §3.5 added Memory Interface definition. §13 updated Phase 1 and Phase 2 implementation state to reflect Open Brain HTTP modules. Reconciliation of as-built Open Brain write path across 12 Make modules.
+- **Last change:** v0.4.0 — §2 added Supabase/Open Brain as external dependency. §3b added Semantic Memory provider row. §3.5 added Memory Interface definition. §13 updated Phase 1 and Phase 2 implementation state to reflect Open Brain HTTP modules. Reconciliation of as-built Open Brain write path across 12 live Make modules (of 24 total routes including fix-delete routes and parked backup array).
 
 ---
 
@@ -298,7 +298,7 @@ Each boundary in the pipeline has a named interface that defines the data shape 
 
 **Endpoint:** `https://<<SUPABASE_PROJECT_REF>>.supabase.co/functions/v1/ingest-thought`
 
-**Note:** Backup/fallback array modules will be cloned from primary once primary routes are tuned and hardened.
+**Note:** 24 total Make routes exist (12 live write modules + fix-delete routes + parked backup array). Backup/fallback array modules will be cloned from primary once primary routes are tuned and hardened.
 
 ---
 

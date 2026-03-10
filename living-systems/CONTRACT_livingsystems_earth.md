@@ -345,14 +345,13 @@ RSS feed is implemented in Phase 2. Hugo has built-in RSS support. The feed enab
 
 ## §13 Related Documents
 
-- [CONTRACT (OpenClaw Deployment)](https://www.notion.so/545a69a1ea2a41de9a5fb5edaaaa1ea5) — parent contract (platform rules)
-[https://github.com/sharedterrain/Notion-Mirror/magi/CONTRACT.md](https://github.com/sharedterrain/Notion-Mirror/brain-stem/CONTRACT.md)
+- [CONTRACT (Open-Claw Deployment)](https://www.notion.so/545a69a1ea2a41de9a5fb5edaaaa1ea5) — parent contract (platform rules)
 
 - [CONTRACT (Hub)](https://www.notion.so/c18af9cbec3b4c388c3561036a4871f1) — workspace-wide governance
-[https://github.com/sharedterrain/Notion-Mirror/hub/CONTRACT-Hub.md](https://github.com/sharedterrain/Notion-Mirror/brain-stem/CONTRACT.md)
+[https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/hub/CONTRACT-Hub.md](https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/hub/CONTRACT-Hub.md)
 
 - [Magi × livingsystems.earth — Scope Assessment & Strategy Plan](https://www.notion.so/31470cff90fc8061a462e56881c2d4e8) — full strategy plan and feasibility assessment
-[https://github.com/sharedterrain/Notion-Mirror/brain-stem/living-systems/Scope-Assessment-Strategy-Plan.md](https://github.com/sharedterrain/Notion-Mirror/brain-stem/CONTRACT.md)
+[https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/living-systems/Scope-Assessment-Strategy-Plan.md](https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/living-systems/Scope-Assessment-Strategy-Plan.md)
 
 - [CONTRACT (Brain Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e) — Brain Stem pipeline (Phase 3 integration source)
 [https://github.com/sharedterrain/Notion-Mirror/brain-stem/CONTRACT.md](https://github.com/sharedterrain/Notion-Mirror/)brain-stem/CONTRACT.md)
