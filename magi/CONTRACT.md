@@ -170,12 +170,6 @@ This ritual ensures continuity across sessions despite Magi's stateless runtime.
 | Complex architectural decisions | Sonnet 4.5 | First-class support in OpenClaw's agent runtime |
 | Perspective reset / unblocking | Opus 4.6 | High-level reasoning when other models are stuck; not for routine work. Cost justified only when cheaper models have failed to resolve the issue. |
 
-**Routing table updates:** This table is configuration, not architecture. It changes as models improve, new models ship, or testing reveals better matches. Updates to the routing table are Lane B edits (bounded write) — no change record required, but must be logged in the Configuration Decisions page.
-
-### §4.3 Gemini Pro Subscription
-
-**Standing clarification:** Jedidiah's Gemini Pro retail subscription (paid through Oct 2026) does **not** include API access. It provides consumer-facing Gemini features only. All API usage is billed through OpenRouter. This subscription does not offset API costs.
-
 ---
 
 ## §5 Messaging Channel
@@ -288,7 +282,11 @@ If the value-to-error ratio degrades, the operator may tighten the approval surf
 
 ## §8 Security Posture
 
+⚠️ **STALE — pending v1.0 rewrite via V3 architecture sessions.** The invariants below remain in force. Specific access mechanisms (zsh subshell wrapping, `~/.zshenv` keychain loading) were written for the pre-v2026.3.2 exec environment and must be re-verified post-update. The exec settings reset (§6.2) may have changed the shell environment behavior.
+
 **Invariant:** The `<<PLACEHOLDER>>` pattern from CONTRACT (Hub) §11 applies to all Magi configuration. Real secrets (API keys, SSH keys, tokens) are never stored in Notion pages.
+
+**Invariant:** Brain keys are stored in macOS keychain, never in bootstrap files, environment variable exports, or Notion. The specific mechanism for loading them into the exec environment is an implementation detail that must be verified against the current OpenClaw version.
 
 **Magi-specific security rules:**
 
@@ -300,24 +298,21 @@ If the value-to-error ratio degrades, the operator may tighten the approval surf
 
 - **Hosting credentials (WHC SFTP/SSH):** stored locally on Metacarcinus, never in Notion
 
-- **Open Brain API key (**`OPEN_BRAIN_KEY`**):** stored in macOS keychain on Metacarcinus, loaded via `~/.zshenv` into zsh subshells only (not base exec environment), passed as `x-brain-key` header to Supabase edge functions, never in Notion
+- **Open Brain API key (**`OPEN_BRAIN_KEY`**):** stored in macOS keychain on Metacarcinus, passed as `x-brain-key` header to Supabase edge functions, never in Notion. Access mechanism: previously loaded via `~/.zshenv` into zsh subshells only — **verify post v2026.3.2 update**
 
-- **Magi Brain API key (**`MAGI_BRAIN_KEY`**):** stored in macOS keychain on Metacarcinus, loaded via `~/.zshenv` into zsh subshells only (not base exec environment), passed as `x-brain-key` header to Supabase edge functions, never in Notion
+- **Magi Brain API key (**`MAGI_BRAIN_KEY`**):** stored in macOS keychain on Metacarcinus, passed as `x-brain-key` header to Supabase edge functions, never in Notion. Access mechanism: previously loaded via `~/.zshenv` into zsh subshells only — **verify post v2026.3.2 update**
 
 - **Messaging channel tokens:** managed by OpenClaw's channel integration, never in Notion
 
-**Brain access hardening discipline:**
+**Brain access mechanism (needs re-verification):**
 
-Both `OPEN_BRAIN_KEY` and `MAGI_BRAIN_KEY` are ONLY available in zsh subshells (loaded via `~/.zshenv` keychain lookup). The base exec environment does NOT have these keys. Every brain curl command MUST be wrapped in `/bin/zsh -c '...'` or authentication will fail with `Unauthorized` (empty key expansion). This is intentional security design — keys are not in the base process environment.
+Pre-v2026.3.2, both `OPEN_BRAIN_KEY` and `MAGI_BRAIN_KEY` were loaded via `~/.zshenv` keychain lookup and available only in zsh subshells, requiring `/bin/zsh -c '...'` wrapping for all brain curl commands. Post-update, exec settings were reset to `security=full, ask=off` (see §6.2) — the shell environment behavior may have changed. Before relying on the previous access pattern, verify:
 
-Validation pattern:
+1. Whether `~/.zshenv` is still sourced in the current exec environment
 
-```bash
-/bin/zsh -c 'echo $OPEN_BRAIN_KEY | head -c 8'   # Should return first 8 chars
-/bin/zsh -c 'echo $MAGI_BRAIN_KEY | head -c 8'   # Should return first 8 chars
-```
+1. Whether brain keys are accessible in the base exec environment or still require zsh subshell wrapping
 
-See [AGENTS.md](http://agents.md/) §Memory "Accessing the Supabase Brains" for full curl command templates.
+1. Update [AGENTS.md](http://agents.md/) §Memory curl templates to match the verified mechanism
 
 **Security posture tracking:** See Security Posture page under Magi project space for current state.
 
@@ -391,13 +386,11 @@ Magi serves as the execution platform for project-specific work. Each project th
 
 - [CONTRACT (Hub)](https://www.notion.so/c18af9cbec3b4c388c3561036a4871f1) — parent contract
 
-- [Magi Status & State](https://www.notion.so/39963e5a01df458697b3292dead142ac) — current runtime state
-
 - [Configuration Decisions](https://www.notion.so/a5354158620348de908d5ffb31e35036) — decision log for routing, channel, and config changes
 
 - [AGENTS.md - Magi's Workspace](https://www.notion.so/6ec71b9a997f41e7b6cf6613861c5f5d) — operational guidance and session startup ritual
 
-- [Magi × livingsystems.earth — Scope Assessment & Strategy Plan](https://www.notion.so/31470cff90fc8061a462e56881c2d4e8) — first downstream project strategy
+- [livingsystems.earth — Site Vision & Product Definition](https://www.notion.so/f11a671681874fea820c6d352104e311) — first downstream project strategy
 
 ---
 

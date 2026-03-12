@@ -3,9 +3,9 @@
 ```yaml
 ---
 doc_id: "contract_livingsystems_earth"
-contract_version: "0.1.0"
+contract_version: "0.2.0"
 parent_contract: "contract_openclaw_deployment"
-last_updated: "2026-02-27"
+last_updated: "2026-03-10"
 owner: "Jedidiah Duyf"
 created: "2026-02-27"
 ---
@@ -59,6 +59,8 @@ This contract governs [**livingsystems.earth**](http://livingsystems.earth/) —
 
 1. **Proof of concept** demonstrating agentic site building and maintenance — directly relevant to future consulting engagements
 
+1. **LCA Database host** — a public-facing Life Cycle Assessment data tool embedded within the site as a dynamic feature module. The LCA Database makes environmental impact data accessible to non-specialists (designers, procurement teams, students, sustainability-curious consumers), drives organic traffic, demonstrates analytical capability, and serves as the freemium lead-generation engine for future B2B offerings. Governed by its own child contract: CONTRACT (LCA Database) v0.1.0, subordinate to this contract.
+
 **Invariant:** The site is a living document, not a brochure. It evolves continuously through autonomous research, content generation, and Magi-driven maintenance cycles.
 
 ---
@@ -101,7 +103,19 @@ livingsystems.earth/
 
 **Invariant:** The `products/` content section exists from launch. The full funnel architecture develops as offerings crystallize, but the structural accommodation is present from day one.
 
-### §3.4 Deployment Pipeline
+### §3.5 LCA Database — Dynamic Data Component
+
+The LCA Database feature introduces a dynamic data component beyond Hugo's static output. This is architecturally accommodated via the **JS islands pattern** already established in §3.1 — Hugo generates the site shell and all content pages; one or more pages mount the LCA application component as an interactive island.
+
+**Invariant:** The LCA application is a consumer of a **versioned REST API** (API-first architecture). The frontend component and the data-serving backend are independently deployable and independently replaceable. No tight coupling between the Hugo site and the LCA data layer.
+
+**Invariant:** The LCA data layer must remain **modular and portable** — no vendor lock-in on the infrastructure platform. The specific platform where the API and data store run (serverless functions, lightweight server, managed database, etc.) is an open architectural decision governed by CONTRACT (LCA Database) and subject to a dedicated planning session.
+
+**Invariant:** The LCA feature ships with **open, publicly available datasets only** for v1 (USLCI, USDA LCA Digital Commons, TRACI). Licensed datasets (ecoinvent, GaBi) are deferred until B2B revenue justifies them. See CONTRACT (LCA Database) for the full data source registry and pipeline specification.
+
+**Data pipeline:** Magi crawls public data sources → parses and normalizes to common schema → deduplicates → stores in backend → serves through API → LCA island component renders results. Human review checkpoints apply at data validation stages.
+
+### §3.6 Deployment Pipeline
 
 **Invariant:** Deployment follows a deterministic pipeline: Magi builds locally → verifies build → commits to Git → deploys to hosting via rsync/SFTP or Git hooks → reports status to messaging channel.
 
@@ -235,7 +249,19 @@ Brain Stem content outputs map to Hugo-compatible Markdown via Make webhook or d
 
 **Invariant:** Brain Stem integration does not alter the site's publishing workflow. Brain Stem content enters the same draft → review → approve → publish pipeline as Magi-generated content.
 
-### §8.2 RSS & Syndication
+### §8.2 LCA Database (Phase 2–3)
+
+The LCA Database is a major feature module of this site, governed by CONTRACT (LCA Database) v0.1.0 (subordinate to this contract). It introduces a dynamic data component into the static site architecture.
+
+**Data flow:** Magi crawls public LCA data sources (USLCI, USDA, TRACI) → normalizes to common schema → stores in data backend → serves through versioned REST API → LCA island component on the site renders search, browse, and compare interfaces.
+
+**Invariant:** The LCA feature follows the same human approval gate as all site content. The LCA data pipeline outputs and the feature going live on the site both require Jedidiah's review and approval via messaging channel.
+
+**Invariant:** The LCA data layer is independently deployable from the Hugo site. The site mounts the LCA frontend as a JS island; the backend API is a separate service. Either can be updated without rebuilding the other.
+
+**Contract reference:** All LCA-specific architectural decisions (data sources, schema, API specification, infrastructure platform, evolution path to LCA Pro B2B) are governed by CONTRACT (LCA Database). This contract governs only the integration surface: how the LCA feature fits within the site's architecture, publishing workflow, and phase boundaries.
+
+### §8.3 RSS & Syndication
 
 RSS feed is implemented in Phase 2. Hugo has built-in RSS support. The feed enables syndication and future integration with external platforms.
 
@@ -271,7 +297,7 @@ RSS feed is implemented in Phase 2. Hugo has built-in RSS support. The feed enab
 
 - Deployment succeeds 3 consecutive times without intervention
 
-### Phase 2: Content Engine
+### Phase 2: Content Engine + LCA Data Pipeline
 
 **Complete when:**
 
@@ -282,6 +308,26 @@ RSS feed is implemented in Phase 2. Hugo has built-in RSS support. The feed enab
 - Content publishing cadence established (weekly minimum)
 
 - RSS feed operational
+
+- LCA data pipeline operational: Magi crawls MVP datasets (USLCI, USDA, TRACI), normalizes to common schema, and stores in data backend
+
+- LCA data validated at human review checkpoints
+
+- LCA infrastructure platform decision made and documented (dedicated planning session)
+
+### Phase 2.5: LCA Feature Live
+
+**Complete when:**
+
+- LCA search/browse/compare interface mounted on the site as JS island
+
+- LCA API serving normalized data from MVP datasets
+
+- A user can search for a material or process and see environmental impact scores
+
+- LCA feature approved by Jedidiah and deployed to production
+
+- LCA informational content pages published (methodology explainers, dataset descriptions)
 
 ### Phase 3: Brain Stem Integration
 
@@ -340,6 +386,7 @@ RSS feed is implemented in Phase 2. Hugo has built-in RSS support. The feed enab
 | **Version** | **Date** | **Description** |
 | --- | --- | --- |
 | 0.1.0 | 2026-02-27 | Initial draft. Codifies Hugo + WHC + flat-file architecture, content strategy, publishing workflow with human review gate, lead funnel from day one, green hosting requirement, and phase boundaries. Derived from Feb 27 Strategy Plan and advisory session. |
+| 0.2.0 | 2026-03-10 | LCA Database integration. Added LCA as core feature in §2 Site Identity. Added §3.5 (LCA dynamic data component — JS islands, API-first, modular/portable, open datasets only for v1). Added §8.2 (LCA integration point with data flow and contract reference). Updated §9 phase boundaries: Phase 2 expanded to include LCA data pipeline, new Phase 2.5 for LCA feature going live. Renumbered deployment pipeline (§3.6) and RSS (§8.3). Reflects architectural decision that LCA Database is a feature of [livingsystems.earth](http://livingsystems.earth/), not a separate project. |
 
 ---
 
@@ -354,8 +401,10 @@ RSS feed is implemented in Phase 2. Hugo has built-in RSS support. The feed enab
 - [Magi × livingsystems.earth — Scope Assessment & Strategy Plan](https://www.notion.so/31470cff90fc8061a462e56881c2d4e8) — full strategy plan and feasibility assessment
 [https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/living-systems/Scope-Assessment-Strategy-Plan.md](https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/living-systems/Scope-Assessment-Strategy-Plan.md)
 
-- [CONTRACT (Brain Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e) — Brain Stem pipeline (Phase 3 integration source)
+- [CONTRACT (Brain-Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e) — Brain Stem pipeline (Phase 3 integration source)
+
+- [CONTRACT (LCA Database)](https://www.notion.so/0042bf99ca59458b80e1725b0b381ec5) — LCA feature module (child contract, subordinate to this contract)
 [https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/brain-stem/CONTRACT.md](https://raw.githubusercontent.com/sharedterrain/Notion-Mirror/refs/heads/main/brain-stem/CONTRACT.md)
 ---
 
-**End of CONTRACT (**[**livingsystems.earth**](http://livingsystems.earth/)**) v0.1.0**
+**End of CONTRACT (**[**livingsystems.earth**](http://livingsystems.earth/)**) v0.2.0**

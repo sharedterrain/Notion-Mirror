@@ -1,3 +1,16 @@
+# notion_to_md.py (notion-mirror)
+
+```yaml
+---
+doc_id: "notion_to_md_public"
+last_updated: "2026-03-11"
+contract_version: "0.2.0"
+---
+```
+
+> 📍 **Repo:** `sharedterrain/notion-mirror` · **Path:** `scripts/notion_to_md.py`
+
+```python
 #!/usr/bin/env python3
 """
 notion_to_md.py
@@ -7,22 +20,30 @@ fetches block content for each page (with full pagination),
 converts to clean Markdown, and writes .md files to the repo.
 
 Skips pages where last_edited_time has not changed since Last Mirrored,
-UNLESS Last Mirrored Visibility differs from current VISIBILITY — in that
-case the page is force-converted regardless of timestamp (Visibility change
-detection). Stale copy cleanup in the old repo is a manual step.
+UNLESS:
+  - Last Mirrored Visibility differs from current VISIBILITY (visibility
+    change detection), OR
+  - Mirror Status == "Stale" (manual force-convert trigger)
+
+In either force case, the page is re-converted regardless of timestamp.
+Stale copy cleanup in the old repo is a manual step.
 
 Writes Mirror Status, Last Mirrored, and Last Mirrored Visibility back to
 each mapping row on completion. Staleness flagging is handled separately
 by check_staleness.py.
 
+Per-page errors are caught and reported without aborting the run. All
+successfully converted pages are written and committed. Script exits 1
+only if one or more pages failed.
+
 Filters by VISIBILITY environment variable:
-  - "Public"  — process only rows where Visibility = Public (default)
+  - "Public"  — process only rows where Visibility = Public
   - "Private" — process only rows where Visibility = Private
 
 Required env vars:
   NOTION_API_TOKEN          — Notion integration token
   NOTION_EXPORT_SCOPE_DB_ID — optional override; defaults to known DB ID
-  VISIBILITY                — "Public" or "Private" (default: Public)
+  VISIBILITY                — "Public" or "Private" (required, no default)
 """
 
 import os
@@ -43,7 +64,10 @@ EXPORT_SCOPE_DB_ID = os.environ.get(
     "NOTION_EXPORT_SCOPE_DB_ID", "38f8657d2479419599377864111fea70"
 )
 
-VISIBILITY = os.environ.get("VISIBILITY", "Public")
+VISIBILITY = os.environ.get("VISIBILITY")
+if VISIBILITY not in ("Public", "Private"):
+    print('ERROR: VISIBILITY must be set to "Public" or "Private".', file=sys.stderr)
+    sys.exit(1)
 
 NOTION_VERSION = "2022-06-28"
 HEADERS = {
@@ -53,7 +77,6 @@ HEADERS = {
 }
 
 REPO_ROOT = Path(__file__).parent.parent
-
 
 # ── Export Scope query ────────────────────────────────────────────────────────
 
@@ -94,6 +117,10 @@ def fetch_export_scope() -> list:
                 (props.get("Last Mirrored Visibility", {}).get("select") or {}).get("name", "")
             )
 
+            mirror_status = (
+                (props.get("Mirror Status", {}).get("select") or {}).get("name", "")
+            )
+
             if not page_id or not path:
                 print(f"  SKIP — missing page_id or path for row: {name!r}")
                 continue
@@ -105,6 +132,7 @@ def fetch_export_scope() -> list:
                 "row_id": row["id"],
                 "last_mirrored": last_mirrored,
                 "last_mirrored_visibility": last_mirrored_visibility,
+                "mirror_status": mirror_status,
             })
 
         if data.get("has_more"):
@@ -113,7 +141,6 @@ def fetch_export_scope() -> list:
             break
 
     return pages
-
 
 # ── Notion API helpers ────────────────────────────────────────────────────────
 
@@ -128,7 +155,6 @@ def update_mirror_status(row_id: str, status: str) -> None:
         }
     }
     requests.patch(url, headers=HEADERS, json=payload)
-
 
 def fetch_page_metadata(page_id: str) -> dict:
     """Fetch page title and last_edited_time."""
@@ -147,7 +173,6 @@ def fetch_page_metadata(page_id: str) -> dict:
 
     last_edited = data.get("last_edited_time", "")
     return {"title": title, "last_edited_time": last_edited}
-
 
 def fetch_blocks(block_id: str) -> list:
     """Fetch all block children with full pagination, recursing into nested blocks."""
@@ -172,7 +197,6 @@ def fetch_blocks(block_id: str) -> list:
             block["_children"] = []
 
     return blocks
-
 
 # ── Rich text helpers ─────────────────────────────────────────────────────────
 
@@ -204,7 +228,6 @@ def rich_text_to_md(rich_texts: list) -> str:
 
         parts.append(text)
     return "".join(parts)
-
 
 # ── Block-to-Markdown conversion ──────────────────────────────────────────────
 
@@ -328,12 +351,10 @@ def block_to_md(block: dict, depth: int = 0) -> str:
 
     return "\n".join(lines)
 
-
 def blocks_to_md(blocks: list) -> str:
     sections = [block_to_md(b) for b in blocks]
     raw = "\n\n".join(sections)
     return re.sub(r"\n{3,}", "\n\n", raw).strip() + "\n"
-
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -357,6 +378,7 @@ def main():
         row_id = entry["row_id"]
         last_mirrored = entry["last_mirrored"]
         last_mirrored_visibility = entry["last_mirrored_visibility"]
+        mirror_status = entry["mirror_status"]
         print(f"  → {name}  ({path})")
 
         try:
@@ -366,16 +388,18 @@ def main():
 
             # Detect Visibility change — force conversion if Visibility has changed
             # since last mirror, regardless of content timestamp.
-            # Note: stale copy cleanup in the old repo is a manual step.
             visibility_changed = (
                 last_mirrored_visibility != ""
                 and last_mirrored_visibility != VISIBILITY
             )
 
+            # Detect manual Stale flag — force conversion regardless of timestamp.
+            stale_forced = mirror_status == "Stale"
+
             if visibility_changed:
                 print(f"     ⚠ Visibility changed ({last_mirrored_visibility} → {VISIBILITY}) — forcing conversion")
-
-            # Skip if unchanged since last mirror (and no Visibility change)
+            elif stale_forced:
+                print(f"     ⚠ Mirror Status = Stale — forcing conversion")
             elif last_mirrored and last_edited <= last_mirrored:
                 print(f"     ↩ unchanged — skipping")
                 skipped += 1
@@ -409,6 +433,6 @@ def main():
             print(f"  - {e}")
         sys.exit(1)
 
-
 if __name__ == "__main__":
     main()
+```

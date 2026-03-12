@@ -1,3 +1,16 @@
+# check_staleness.py (notion-mirror)
+
+```yaml
+---
+doc_id: "check_staleness_public"
+last_updated: "2026-03-10"
+contract_version: "0.1.0"
+---
+```
+
+> 📍 **Repo:** `sharedterrain/notion-mirror` · **Path:** `scripts/check_staleness.py`
+
+```python
 #!/usr/bin/env python3
 """
 check_staleness.py
@@ -8,6 +21,11 @@ Two jobs in one script:
 
 Staleness rule: if Last Updated > Last Mirrored, the doc
 has been edited since its last mirror run.
+
+Visibility rule: if Last Mirrored Visibility != Visibility (and Last Mirrored
+Visibility is non-empty), the row is marked Stale regardless of edit time.
+This flags rows where visibility changed since last mirror — a reminder that
+cleanup (e.g. deleting the stale copy from the old repo) may be needed.
 
 Required env vars:
   NOTION_API_TOKEN          — Notion integration token
@@ -58,11 +76,15 @@ def fetch_active_rows() -> list:
 
             source_url = (props.get("Source Page", {}).get("url") or "")
             last_mirrored = (props.get("Last Mirrored", {}).get("date") or {}).get("start", "")
+            visibility = (props.get("Visibility", {}).get("select") or {}).get("name", "")
+            last_mirrored_visibility = (props.get("Last Mirrored Visibility", {}).get("select") or {}).get("name", "")
 
             rows.append({
                 "name": name,
                 "source_url": source_url,
                 "last_mirrored": last_mirrored,
+                "visibility": visibility,
+                "last_mirrored_visibility": last_mirrored_visibility,
                 "row_id": row["id"],
             })
 
@@ -73,13 +95,11 @@ def fetch_active_rows() -> list:
 
     return rows
 
-
 def extract_page_id(source_url: str) -> str:
     """Extract 32-char hex page ID from a Notion URL."""
     clean = source_url.replace("-", "")
     match = re.search(r"([a-f0-9]{32})$", clean)
     return match.group(1) if match else ""
-
 
 # ── Source Page resolution ────────────────────────────────────────────────────
 
@@ -107,14 +127,12 @@ def search_page_by_title(title: str) -> dict | None:
                     }
     return None
 
-
 def write_source_page(row_id: str, page_url: str) -> None:
     """Write a resolved Notion page URL to the Source Page column."""
     url = f"https://api.notion.com/v1/pages/{row_id}"
     payload = {"properties": {"Source Page": {"url": page_url}}}
     r = requests.patch(url, headers=HEADERS, json=payload)
     r.raise_for_status()
-
 
 # ── Staleness helpers ─────────────────────────────────────────────────────────
 
@@ -125,14 +143,12 @@ def fetch_last_edited_time(page_id: str) -> str:
     r.raise_for_status()
     return r.json().get("last_edited_time", "")
 
-
 def write_last_updated(row_id: str, last_edited: str) -> None:
     """Write last_edited_time to the Last Updated column."""
     url = f"https://api.notion.com/v1/pages/{row_id}"
     payload = {"properties": {"Last Updated": {"date": {"start": last_edited}}}}
     r = requests.patch(url, headers=HEADERS, json=payload)
     r.raise_for_status()
-
 
 def write_mirror_status(row_id: str, status: str) -> None:
     """Write Mirror Status to the Export Scope Mapping row."""
@@ -141,6 +157,12 @@ def write_mirror_status(row_id: str, status: str) -> None:
     r = requests.patch(url, headers=HEADERS, json=payload)
     r.raise_for_status()
 
+def write_cleanup_flag(row_id: str) -> None:
+    """Check the Cleanup checkbox on the Export Scope Mapping row."""
+    url = f"https://api.notion.com/v1/pages/{row_id}"
+    payload = {"properties": {"Cleanup": {"checkbox": True}}}
+    r = requests.patch(url, headers=HEADERS, json=payload)
+    r.raise_for_status()
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -183,6 +205,16 @@ def main():
             continue
 
         try:
+            # ── Visibility mismatch check (takes priority) ────────────────
+            lmv = row["last_mirrored_visibility"]
+            vis = row["visibility"]
+            if lmv and lmv != vis:
+                write_mirror_status(row_id, "Stale")
+                write_cleanup_flag(row_id)
+                print(f"  ⚠ {name} — visibility changed ({lmv} → {vis}) → STALE (cleanup needed)")
+                continue
+
+            # ── Edit-time staleness check ─────────────────────────────────
             last_edited = fetch_last_edited_time(page_id)
             if not last_edited:
                 print(f"  SKIP — no last_edited_time for: {name!r}")
@@ -214,6 +246,6 @@ def main():
     else:
         print("\nAll pages checked.")
 
-
 if __name__ == "__main__":
     main()
+```

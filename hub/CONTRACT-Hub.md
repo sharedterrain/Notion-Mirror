@@ -31,7 +31,7 @@ This document is the **highest-authority governance artifact** in the workspace.
 
 1. **CONTRACT (Hub)** — workspace-wide rules (this document)
 
-1. **Project CONTRACTs** (e.g., [CONTRACT (Brain Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e)) — project-scoped rules
+1. **Project CONTRACTs** (e.g., [CONTRACT (Brain-Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e)) — project-scoped rules
 
 1. **All other documents** — steering docs, phase docs, architecture pages, protocols, instruction sets
 
