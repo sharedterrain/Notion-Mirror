@@ -1,44 +1,36 @@
 name: convert
-
 on:
   workflow_dispatch:
   repository_dispatch:
     types: [notion-mirror]
-
 permissions:
   contents: write
-
 jobs:
   convert:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install dependencies
         run: pip install requests
-
       - name: Run Notion converter
         env:
           NOTION_API_TOKEN: ${{ secrets.NOTION_API_TOKEN }}
           VISIBILITY: Public
         run: python scripts/notion_to_md.py
-
       - name: Commit converted markdown files
+        if: always()
         run: |
-          git config user.name  "notion-mirror[bot]"
+          git config user.name "notion-mirror[bot]"
           git config user.email "notion-mirror[bot]@users.noreply.github.com"
-          git add .
+          git add -- . ':!.github/workflows/'
           git diff --cached --quiet || git commit -m "docs: sync Notion pages to markdown [skip ci]"
           git pull --rebase origin main
           git push
-          
