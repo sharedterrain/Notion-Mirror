@@ -276,8 +276,9 @@ This two-layer approach ensures continuity across sessions despite the stateless
 
 | **Task** | **Model** | **Rationale** |
 | --- | --- | --- |
-| Main agent (coordinator) | `google/gemini-3-flash-preview` | Flash default; escalates to Sonnet via spawn |
+| Main agent (coordinator) | `anthropic/claude-sonnet-4-6` (direct) | Sonnet default; Flash unreliable for routing decisions (CD-032) |
 | Morning brief (strategic arbiter) | `anthropic/claude-sonnet-4.6` | Daily cron default; Opus on-demand only |
+| Fallback / lightweight coordination | `google/gemini-3-flash-preview` | Demoted from coordinator default (CD-032) |
 | Heartbeat | `google/gemini-2.0-flash-lite` | No change |
 | Research and content | `google/gemini-3.1-pro-preview` | Retained for non-spawn research tasks |
 | Tool-use-heavy / exec ops | `anthropic/claude-sonnet-4-6` (direct) | Direct Anthropic API; OpenRouter fallback fails in sub-agent sessions (CD-029) |
