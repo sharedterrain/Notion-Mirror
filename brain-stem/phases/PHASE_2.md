@@ -3,8 +3,8 @@
 ```yaml
 ---
 doc_id: "phase_2"
-last_updated: "2026-03-07"
-contract_version: "0.4.0"
+last_updated: "2026-03-22"
+contract_version: "0.5.0"
 ---
 ```
 
@@ -36,7 +36,7 @@ This phase extends the Classification Interface implementation from Phase 1 with
 
 - **CONTRACT §15: Change Control Protocol** — fix→refile workflow as a discovery→reconcile path
 
-See: [CONTRACT (Brain-Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e) v0.2.0 | [contracts/spec (Brain-Stem)](https://www.notion.so/98d781fe40ed4e31a566f0d8886325fc)
+See: [CONTRACT (Brain-Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e) v0.5.0 | [contracts/spec (Brain-Stem)](https://www.notion.so/98d781fe40ed4e31a566f0d8886325fc)
 
 ---
 
@@ -284,7 +284,7 @@ INSTRUCTIONS:
 4. Return raw JSON only, no markdown code fences.
 
 SCHEMAS:
-PEOPLE: {"name":"string","context":"string","follow_ups":"string","notes":"string","tags":["string"],"reason":"string"}
+PEOPLE: {"name":"string","entity_type":"person|organization","context":"string","follow_ups":"string","notes":"string","tags":["string"],"reason":"string"}
 PROJECTS: {"name":"string","project_type":"digital|physical|hybrid","status":"active|waiting|blocked|someday|done","next_action":"string","notes":"string","tags":["string"],"reason":"string"}
 IDEAS: {"name":"string","one_liner":"string","notes":"string","tags":["string"],"reason":"string"}
 ADMIN: {"name":"string","due_date":"YYYY-MM-DD|null","notes":"string","tags":["string"],"reason":"string"}
@@ -450,6 +450,36 @@ The full classifier prompt (`brain_dump_classifier_v1`) is now authoritative in 
 | Admin (no date) | ✅ main | — | — | ✅ | ✅ | ✅ | Due Date skipped |
 | Projects (type+status) | ✅ main | — | — | ✅ | ✅ | ✅ | Both populated |
 
+### Session Updates — Mar 22, 2026
+
+**Destination guard (after module 208):**
+
+Router added after module 208 with a valid keyword filter checking the fix: destination matches a known table name (people, projects, ideas, admin, events). Module 291 sends a Slack error reply on mismatch, preventing invalid destinations from reaching re-extraction.
+
+**Empty 209 guard:**
+
+Filter added after module 209 Airtable lookup checking `209.Data.records` array is not empty. Module 298 sends a Slack error reply ("No original capture found in this thread") if no Inbox Log record matches the thread timestamp.
+
+**fix: route restricted to threaded replies:**
+
+Fix route filter updated: now requires `1.event.thread_ts` Exists AND `1.event.thread_ts` ≠ `1.event.ts` in addition to `^fix:` pattern match. Prevents top-level messages starting with "fix:" from triggering the correction flow.
+
+**Entity Type conditional PATCH (fix: People route):**
+
+Conditional PATCH module added after People create (module 215) on the fix route. Filter: `213.entity_type` Exists. Body: `{"fields": {"Entity Type": "capitalize(213.entity_type)"}}`. Mirrors the BD route pattern (module 301 — see Phase 1).
+
+**Tags implementation (fix route create modules):**
+
+Tags field now written at capture time on all 5 fix route create modules. Value: `join(213.tags; ", ")`. Controlled vocabulary defined in Module 210 prompt (matching module 48). State-based tags (`urgent`, `in-progress`, `blocked`, `someday`) removed from vocabulary.
+
+**Module 210 prompt update:**
+
+- `entity_type` field added to PEOPLE schema: `"entity_type":"person|organization"`
+
+- Duplicate `follow_ups` key removed from PEOPLE schema
+
+- Controlled tag vocabulary added (same list as module 48)
+
 ### Known Deferred Items
 
 1. **Few-shot examples for classifier** — Phase 2 spec calls for adding ground truth from fix actions to the classifier prompt. Not yet implemented. Fix corrections provide labeled outcomes for tuning.
@@ -460,13 +490,13 @@ The full classifier prompt (`brain_dump_classifier_v1`) is now authoritative in 
 
 1. **AI Output Raw in PATCH bodies** — Still deferred from Phase 1. Claude's raw response contains characters that break JSON embedding.
 
-1. **Tags** — Still deferred. Tags field is Long Text across all tables. Claude returns tags array; not written at capture time.
+1. ~~**Tags**~~ — **Resolved Mar 22, 2026.** Tags now written at capture time on all create modules (BD + fix routes). Controlled vocabulary in modules 48 and 210; state-based tags removed.
 
 1. **OpenRouter fallback for fix route** — Fix route uses Anthropic Claude only (module 210). No fallback branch wired. If Anthropic is down, fix commands will fail.
 
 1. **Error handling on fix route** — No error handler on module 210 or downstream modules. A failed fix leaves the original record deleted but no new record created.
 
-1. **Empty 209 guard** — If module 209 returns no record (e.g., fix: sent in wrong thread), all downstream modules receive empty pills. Needs a filter after 209 checking records array is not empty, with a Slack error reply.
+1. ~~**Empty 209 guard**~~ — **Resolved Mar 22, 2026.** Filter after 209 checks records array is not empty; module 298 sends Slack error reply if no record found.
 
 ---
 
@@ -510,7 +540,7 @@ The full classifier prompt (`brain_dump_classifier_v1`) is now authoritative in 
 
 - [ ] OpenRouter fallback for fix route
 
-- [ ] Error handling / empty 209 guard
+- [x] Error handling / empty 209 guard (Mar 22)
 
 - [x] End-to-end test in live mode
 
@@ -518,4 +548,4 @@ The full classifier prompt (`brain_dump_classifier_v1`) is now authoritative in 
 
 ## Next Phase
 
-[Phase 3: Research Pipeline](https://www.notion.so/33c94ae1c521433ea32092a1a7856f90)
+[Phase 3: Research Pipeline — Architecture Draft](https://www.notion.so/33c94ae1c521433ea32092a1a7856f90)

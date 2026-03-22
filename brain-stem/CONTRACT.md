@@ -3,7 +3,7 @@
 ```yaml
 ---
 doc_id: "contract_brain_stem"
-last_updated: "2026-03-19"
+last_updated: "2026-03-22"
 contract_version: "0.5.0"
 parent_contract: "contract_hub"
 ---
@@ -547,7 +547,7 @@ Classify the following brain dump into ONE of these categories:
 
 **OUTPUT FORMAT (raw JSON with no code block formatting):**
 
-{"destination": "people|projects|ideas|admin|events|needs_review", "confidence": 0.85, "data": {"name": "Clear, descriptive title", "context": "For PEOPLE: relationship and interaction notes", "follow_ups": "For PEOPLE: specific next actions with this person", "status": "For PROJECTS: active|waiting|blocked|someday|done", "next_action": "For PROJECTS: Specific executable action", "notes": "For PROJECTS/IDEAS/EVENTS: Additional context", "one_liner": "For IDEAS: Core insight in one sentence", "due_date": "For ADMIN/EVENTS: YYYY-MM-DD or null", "start_time": "For EVENTS: YYYY-MM-DDTHH:MM:SS.000Z UTC, infer timezone as America/Vancouver today's date is now and convert, or null", "end_time": "For EVENTS: YYYY-MM-DDTHH:MM:SS.000Z UTC, infer timezone as America/Vancouver today's date is now and convert, or null", "attendees": "For EVENTS: comma-separated names or null", "location": "For EVENTS: location name or null", "tags": ["relevant", "tags"], "project_type": "digital|physical|hybrid (based on keywords above)"}, "reason": "Brief explanation of why this classification and confidence score"}
+{"destination": "people|projects|ideas|admin|events|needs_review", "confidence": 0.85, "data": {"name": "Clear, descriptive title", "context": "For PEOPLE: relationship and interaction notes", "follow_ups": "For PEOPLE: specific next actions with this person", "status": "For PROJECTS: active|waiting|blocked|someday|done", "next_action": "For PROJECTS: Specific executable action", "notes": "For PROJECTS/IDEAS/EVENTS: Additional context", "one_liner": "For IDEAS: Core insight in one sentence", "due_date": "For ADMIN/EVENTS: YYYY-MM-DD or null", "start_time": "For EVENTS: YYYY-MM-DDTHH:MM:SS.000Z UTC, infer timezone as America/Vancouver today's date is now and convert, or null", "end_time": "For EVENTS: YYYY-MM-DDTHH:MM:SS.000Z UTC, infer timezone as America/Vancouver today's date is now and convert, or null", "attendees": "For EVENTS: comma-separated names or null", "location": "For EVENTS: location name or null", "tags": ["relevant", "tags"], "project_type": "digital|physical|hybrid (based on keywords above)", "entity_type": "person|organization (for PEOPLE, omit for others)"}, "reason": "Brief explanation of why this classification and confidence score"}
 
 **CONFIDENCE SCORING RULES:**
 - 0.85-1.0: Very clear classification, all key info present
@@ -579,7 +579,8 @@ Classify the following brain dump into ONE of these categories:
     "attendees": "string|null (for Events, comma-separated)",
     "location": "string|null (for Events)",
     "tags": ["string"],
-    "project_type": "digital|physical|hybrid"
+    "project_type": "digital|physical|hybrid",
+    "entity_type": "person|organization (for People)"
   },
   "reason": "string"
 }

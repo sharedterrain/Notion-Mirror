@@ -3,8 +3,8 @@
 ```yaml
 ---
 doc_id: "phase_1"
-last_updated: "2026-03-07"
-contract_version: "0.4.0"
+last_updated: "2026-03-22"
+contract_version: "0.5.0"
 ---
 ```
 
@@ -45,7 +45,7 @@ This phase implements the following contract sections:
     - INV-004: Confidence range 0-1
     - INV-008: Auto-file threshold 0.60
 
-See: [CONTRACT (Brain Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e) v0.2.0 | [contracts/spec (Brain Stem)](https://www.notion.so/98d781fe40ed4e31a566f0d8886325fc)
+See: [CONTRACT (Brain-Stem)](https://www.notion.so/cb5393105c784cc3969571a898b4f81e) v0.5.0 | [contracts/spec (Brain-Stem)](https://www.notion.so/98d781fe40ed4e31a566f0d8886325fc)
 
 ---
 
@@ -1628,6 +1628,26 @@ Each is a separate PATCH updating only the linked field, placed between the Crea
 
 - **Known limitation:** Multi-subject messages (e.g. person + project + task in one message) not yet caught by classifier — fuel for Phase 2 few-shot tuning
 
+### Session Updates — Mar 22, 2026
+
+**Entity Type conditional PATCH (BD People route — module 301):**
+
+Conditional PATCH module added after People create (module 65) on the primary BD route. Filter: `55.data.entity_type` Exists. Body: `{"fields": {"Entity Type": "capitalize(55.data.entity_type)"}}`. URL: Airtable People table + `65.data.id` pill.
+
+**Tags implementation (all 8 BD route create modules):**
+
+Tags field now written at capture time on all destination create modules across both primary and OpenRouter fallback branches (8 total). Value: `join(55.data.tags; ", ")` (comma-separated Long text from Claude's array).
+
+**Module 48 prompt update — controlled vocabulary + entity_type:**
+
+- Controlled tag vocabulary added to classifier prompt
+
+- State-based tags (`urgent`, `in-progress`, `blocked`, `someday`) removed — overlap with Status values
+
+- `entity_type` field added to output schema for PEOPLE classifications: `"entity_type": "person|organization"`
+
+- See CONTRACT §8 for authoritative prompt text
+
 ### Known Deferred Items
 
 1. ~~Linked Record Fields~~ — **Resolved Feb 21, 2026**
@@ -1650,9 +1670,9 @@ Each is a separate PATCH updating only the linked field, placed between the Crea
 
 - Claude returns varying project types for ambiguous messages. Acceptable for now.
 
-1. Tags (all destination tables) — deferred (phase TBD)
+1. ~~Tags (all destination tables)~~ — **Resolved Mar 22, 2026**
 
-- Tags field type changed to Long Text across all destination tables. Claude continues returning tags array; not written to Airtable at capture time. Airtable AI will generate tags during enrichment pass (phase TBD, not Phase 3 Research).
+- Tags now written at capture time on all 8 BD route create modules (primary + OpenRouter). Value: `join(55.data.tags; ", ")`. Controlled vocabulary in module 48 prompt; state-based tags removed.
 
 1. Linked record fields and multi-entity detection — deferred to Phase 2
 
