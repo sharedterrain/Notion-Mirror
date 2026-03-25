@@ -3,8 +3,8 @@
 ```yaml
 ---
 doc_id: "contract_brain_stem"
-last_updated: "2026-03-22"
-contract_version: "0.5.0"
+last_updated: "2026-03-24"
+contract_version: "0.6.0"
 parent_contract: "contract_hub"
 ---
 ```
@@ -27,7 +27,7 @@ parent_contract: "contract_hub"
 
 - **Last known good commit:** 
 
-- **Last change:** v0.5.0 — §9 Data Contracts reconciled to as-built Airtable schemas from column-level audit. All 6 tables updated with actual field inventory (Source, Source Link, linked records, Tags as Long text, Entity Type, Calendar Source, Calendar Sync Status, Filed To as Single select). Prior §9 was Phase 0 design; this version reflects live Airtable state.
+- **Last change:** v0.6.0 — Phase 3 Research Pipeline. §9 added Domains, Research Lens, Research Jobs, Articles schemas. §3.5 added Research Brain Memory Interface (separate write path). §3b added Research Memory provider row. §7 R: route updated to Phase 3 implementation. §10 INV-001 extended to R: route. §11 added Phase 3 security placeholders. §13 added Phase 3 scope definition.
 
 ---
 
@@ -81,6 +81,8 @@ Brain Stem is a **capture, classification, and publishing system** that transfor
 
 - Supabase + Open Brain (semantic memory — write path via Edge Function)
 
+- Supabase + Research Brain (research memory — separate instance, write path via Edge Function)
+
 ---
 
 ## 3. System Architecture
@@ -125,6 +127,7 @@ The following table maps each functional stage to its current provider. This map
 | Publishing | TBD per platform | TBD |
 | Metrics | TBD per platform | TBD |
 | Semantic Memory | Supabase Edge Function (Open Brain) | x-brain-key header |
+| Research Memory | Research Brain (Supabase) — REST via ingest-thought Edge Function (write-only from Make) | x-brain-key header — separate Supabase project, separate credentials |
 
 **Trust boundaries (provider-specific):**
 
@@ -136,7 +139,9 @@ The following table maps each functional stage to its current provider. This map
 
 - Publishing channels: TBD per platform
 
-- [Make.com](http://make.com/) → Supabase Edge Function: x-brain-key header (fire-and-forget)
+- [Make.com](http://make.com/) → Supabase Edge Function (Open Brain): x-brain-key header (fire-and-forget)
+
+- [Make.com](http://make.com/) → Supabase Edge Function (Research Brain): x-brain-key header (fire-and-forget, separate credentials)
 
 ---
 
@@ -270,7 +275,9 @@ Each boundary in the pipeline has a named interface that defines the data shape 
 
 - `published_at` (ISO-8601 datetime)
 
-### Memory Interface
+### Memory Interface (Open Brain)
+
+**Scope:** This interface definition covers Open Brain writes from Make only. Research Brain is a separate write path with its own payload contract (see Research Brain Memory Interface below).
 
 **Boundary:** Pipeline destination routes → Semantic memory layer
 
@@ -299,6 +306,38 @@ Each boundary in the pipeline has a named interface that defines the data shape 
 **Endpoint:** `https://<<SUPABASE_PROJECT_REF>>.supabase.co/functions/v1/ingest-thought`
 
 **Note:** 24 total Make routes exist (12 live write modules + fix-delete routes + parked backup array). Backup/fallback array modules will be cloned from primary once primary routes are tuned and hardened.
+
+### Research Brain Memory Interface
+
+**Boundary:** Scenario B research runner → Research Brain semantic memory layer
+
+**Trigger:** Fire-and-forget POST after each Article record creation in Scenario B (both sweep and job modes).
+
+**Input (to Research Brain):**
+
+- `text` (string) — Title + snippet from search result
+
+- `url` (string) — Article URL from search result
+
+- `source_domain` (string) — Parsed from URL
+
+- `digest_run_id` (string) — Scenario B execution ID for traceability
+
+- `research_job_id` (string) — Airtable Research Job or Domain record ID
+
+- `published_date` (string) — From search result
+
+- `source_tag` (string) — `"research_digest"` default
+
+**Output:** None (fire-and-forget; response not parsed).
+
+**Current provider:** Supabase Edge Function (`ingest-thought`) — separate Supabase project from Open Brain
+
+**Auth:** `x-brain-key` header with Research Brain access key
+
+**Endpoint:** `https://<<RESEARCH_BRAIN_PROJECT_REF>>.supabase.co/functions/v1/ingest-thought`
+
+**Note:** Research Brain receives unfiltered volume from all research runs. Open Brain receives only deliberately promoted content (Phase 4-5). The two instances share the same Edge Function pattern but have separate projects, credentials, and payload schemas.
 
 ---
 
@@ -338,7 +377,7 @@ Meetings, appointments, calendar items.
 
 - **CAL:** — Calendar/Events (scaffolded, Phase 4)
 
-- **R:** — Research request (scaffolded, Phase 3)
+- **R:** — Research request → Research Jobs table, fires Scenario B immediately (Phase 3)
 
 - **fix:** — Correction/refile (scaffolded, Phase 2)
 
@@ -458,7 +497,11 @@ Note: PRO runs extraction-only (no classification), then auto-files to Projects 
 
 - **Destination:** Research Jobs table
 
-- **Implementation:** Scaffolded (Phase 3)
+- **Intelligence:** Perplexity (research provider, not Claude — no classification or extraction)
+
+- **Behavior:** Creates Research Job record → Inbox Log record (INV-001) → fires Scenario B webhook (`mode: "job"`, record ID) → Slack in-thread confirmation. Scenario B runs the single job immediately, enriches articles via Claude end-of-run call, flags top 3 as Morning Pick.
+
+- **Implementation:** Phase 3
 
 ### fix Route (Corrections)
 
@@ -780,11 +823,117 @@ Classify the following brain dump into ONE of these categories:
 
 - Inbox Log (Linked record → Inbox Log)
 
+### Research Lens Table
+
+**Fields:**
+
+- Entry (Long text)
+
+- Created (Date, auto)
+
+- Active (Checkbox)
+
+### Domains Table
+
+**Fields:**
+
+- Domain Name (Single line text)
+
+- Prompt (Long text)
+
+- Recency Window (Single select: 1d, 7d, 30d)
+
+- Active (Checkbox)
+
+- Last Run (Date)
+
+- Next Run (Date)
+
+- Last Run Summary (Long text)
+
+### Research Jobs Table
+
+**Fields:**
+
+- Job Name (Single line text)
+
+- Query (Long text)
+
+- Active (Checkbox)
+
+- Frequency (Single select: Custom, Daily)
+
+- Recency Window (Single select: 1d, 7d, 30d — default 30d)
+
+- Relevance Threshold (Number — inert Phase 3, future use)
+
+- Include Domains (Long text)
+
+- Exclude Domains (Long text — inert Phase 3, Perplexity allowlist only)
+
+- Language/Region (Single line text)
+
+- Run Now (Checkbox)
+
+- Next Run (Date)
+
+- Last Run (Date)
+
+- Last Run Summary (Long text)
+
+- Articles (Linked record → Articles)
+
+### Articles Table
+
+**Fields:**
+
+- Title (Single line text)
+
+- URL (Single line text)
+
+- Source Domain (Single line text)
+
+- Published Date (Date)
+
+- Thumbnail (URL — deferred)
+
+- Summary (Long text)
+
+- Key Points (Long text)
+
+- Category (Single select)
+
+- Tags (Long text)
+
+- Relevance Score (Number, 0.0–1.0)
+
+- Why It Matters (Long text)
+
+- Status (Single select: New, Reviewed, Saved, Dismissed, Use)
+
+- Full Text (Long text)
+
+- Citations (Long text — deferred)
+
+- Dedup Key (Formula: URL + Published Date)
+
+- Research Job (Linked record → Research Jobs)
+
+- Domain (Linked record → Domains)
+
+- Run ID (Single line text)
+
+- Morning Pick (Checkbox)
+
+- Drafts (Linked record → Drafts — Phase 4-5)
+
 ---
 
 ## 10. Invariants & Validation Rules
 
 *See: Invariants & Checks (Brain Stem)*
+
+**INV-001 coverage:** Every capture route must produce exactly one Inbox Log record. Covered routes: BD (classification), PRO (extraction), fix (correction/refile), R (research). The R: handler creates an Inbox Log record at module ~304 in Scenario A (Status=Filed, Filed To=Research Jobs, Source Link=Slack permalink).
 
 ---
 
@@ -805,6 +954,22 @@ Classify the following brain dump into ONE of these categories:
 **Placeholder format:** `<<PLACEHOLDER_NAME>>`
 
 **Registry:** Every placeholder must be documented in Security & Placeholders page.
+
+**Phase 3 additions:**
+
+- `<<PERPLEXITY_API_KEY>>` — Perplexity API authentication
+
+- `<<RESEARCH_BRAIN_PROJECT_REF>>` — Research Brain Supabase project reference
+
+- `<<RESEARCH_BRAIN_ACCESS_KEY>>` — Research Brain x-brain-key header value
+
+- `<<ARTICLES_TABLE_ID>>` — Airtable Articles table ID
+
+- `<<DOMAINS_TABLE_ID>>` — Airtable Domains table ID
+
+- `<<RESEARCH_LENS_TABLE_ID>>` — Airtable Research Lens table ID
+
+- `<<RESEARCH_JOBS_TABLE_ID>>` — Airtable Research Jobs table ID
 
 ---
 
@@ -868,11 +1033,31 @@ Classify the following brain dump into ONE of these categories:
 
 - [Supabase] Open Brain write path: 5 fire-and-forget HTTP POST modules to `ingest-thought` Edge Function on fix routes (fix: People, fix: Projects, fix: Ideas, fix: Admin, fix: Events) (§3.5 Memory Interface)
 
-- CAL, R routes: Still scaffolded (§7 Route Semantics)
+- CAL route: Still scaffolded (§7 Route Semantics)
 
 - Deferred: Few-shot calibration, weekly misclassification digest, OpenRouter fallback, error handling on fix route
 
-**Phase 3–9:** Not yet implemented
+**Phase 3:** Research Pipeline — *Draft, pre-implementation*
+
+- [Airtable] Domains table (standing domain configs), Research Lens table (free-text context for dynamic domain generation), Research Jobs table (ad-hoc R: queries)
+
+- [Airtable] Articles table additions: Domain (linked → Domains), Run ID, Morning Pick
+
+- [Supabase] Research Brain: new Supabase instance (separate from Open Brain), `ingest-thought` Edge Function, fire-and-forget write from Scenario B (§3.5 Research Brain Memory Interface)
+
+- [[Make.com](http://make.com/)] Scenario B: webhook-triggered research runner. Supports two modes — sweep (all active Domains + Claude-generated slots 4–5 from Research Lens) and job (single Research Job, triggered by R: route or future consumers). The mode flag pattern is architecturally significant — a single scenario handles both scheduled and ad-hoc research via payload-driven branching.
+
+- [[Make.com](http://make.com/)] Scenario C: daily cron (Schedule → webhook POST to Scenario B with `mode: "sweep"`)
+
+- [[Make.com](http://make.com/)] R: prefix handler in Scenario A: creates Research Job → Inbox Log → fires Scenario B webhook (`mode: "job"`) → Slack confirmation (§7 R Route)
+
+- [Claude] End-of-run enrichment: reviews all articles per run, populates Summary, Key Points, Why It Matters, Category, Tags, Relevance Score, Morning Pick (top 3)
+
+- [Perplexity] Research provider: `sonar` model, `search_results[]` as iterator source, If-else/Merge provider routing for future additions
+
+- Morning Pick flag on Articles = Phase 3 ↔ Phase 4-5 interface (Phase 3 sets, Phase 4-5 reads)
+
+**Phase 4–9:** Not yet implemented
 
 ---
 
@@ -882,6 +1067,7 @@ Classify the following brain dump into ONE of these categories:
 
 | **Version** | **Date** | **Description** |
 | --- | --- | --- |
+| 0.6.0 | 2026-03-24 | Phase 3 Research Pipeline additions. §9 added Domains, Research Lens, Research Jobs, Articles table schemas. §3.5 added Research Brain Memory Interface (separate write path from Open Brain — different payload schema, separate Supabase instance). §3b added Research Memory provider row. §7 R: route updated from scaffolded to Phase 3 implementation (Perplexity provider, not Claude). §10 INV-001 coverage explicitly extended to R: route. §11 added 7 security placeholders (Perplexity key, Research Brain credentials, 4 Airtable table IDs). §13 added Phase 3 scope definition including Scenario B mode flag pattern (sweep/job). Minor version bump — new tables, new memory instance, new route implementation, all additive. |
 | 0.5.0 | 2026-03-19 | §9 Data Contracts reconciled to as-built Airtable schemas via column-level screenshot audit. Changes: Tags field corrected from Multiple select → Long text (all destination tables). Source (Single select) and Source Link (URL) added to all tables. Linked record fields added (Inbox Log ↔ destination tables, Drafts, Events on People). People: Follow-ups → Follow-Ups, added Entity Type (Person/Organization). Projects: no structural change beyond shared fields. Ideas: no structural change beyond shared fields. Admin: Status simplified to Todo/Done, added Tags. Events: Event Type expanded (added Volunteering, Workshop), Calendar Source replaces Source (Google Calendar/Manual Entry/Slack), added Calendar Sync Status, Location changed to Long text. Inbox Log: Filed To changed from text → Single select, Captured At → Created (auto), added Linked People/Projects/Ideas/Admin, Destination Record ID, Source, Source Link. Minor version bump — additive fields + type corrections, no interface shape changes. |
 | 0.4.0 | 2026-03-07 | §2 added Supabase/Open Brain as external dependency (semantic memory write path). §3b added Semantic Memory provider row. §3.5 added Memory Interface definition (fire-and-forget POST to ingest-thought). §13 updated Phase 1 and Phase 2 with Open Brain module counts. Trust boundaries updated. Reconciliation of 12 as-built Make HTTP modules (7 primary/PRO + 5 fix routes). Minor version bump — new interface, additive only, no breaking changes. |
 | 0.3.1 | 2026-03-05 | §8 BD classifier prompt reconciled to live module 48 — full prompt text now authoritative in contract (context block, edge cases, Events fields: start_time, end_time, attendees, location). §9 Events table schema updated to match as-built (Title not Name, added Start Time, End Time, Attendees, Location). Patch bump — no interface changes, documentation reconciliation only. |
@@ -968,6 +1154,8 @@ If a downstream doc cannot be updated in the same session, add this banner at th
 - [Phase 1: Brain Dump Capture](https://www.notion.so/0538979e023a46528fb1a70b60ccd4ef)
 
 - [Phase 2: Classification & Routing](https://www.notion.so/548d362076b243f1ad33df72fd6617a1)
+
+- [Phase 3: Research Pipeline — Revised Architecture](https://www.notion.so/33c94ae1c521433ea32092a1a7856f90)
 
 - [Brain Stem Architecture & Flows](https://www.notion.so/8d45305a868d4e73a6555b9e96d53a18)
 

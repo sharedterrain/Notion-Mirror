@@ -1,11 +1,12 @@
-# Phase 3: Research Pipeline — Architecture Draft
+# Phase 3: Research Pipeline — Revised Architecture
 
 ```yaml
 ---
 doc_id: "phase_3"
-last_updated: "2026-03-19"
-contract_version: "0.3.0"
+last_updated: "2026-03-24"
+contract_version: "0.5.0"
 status: "Draft — pre-implementation"
+revision: "v2 — dual-trigger fix, linked record fix, fetch module added, Research Jobs schema added, Results Per Run removed, minor cleanups"
 ---
 ```
 
@@ -13,84 +14,235 @@ status: "Draft — pre-implementation"
 
 ## Overview
 
-Phase 3 builds automated research on top of the existing Brain Stem pipeline. Perplexity runs saved queries from the Research Jobs table and surfaces articles into a new Articles table. Two triggers: scheduled (daily runner) and ad-hoc (R: prefix in Slack).
+Phase 3 builds automated research on top of the existing Brain Stem pipeline. A scheduled daily runner (Scenario C) triggers a single-job runner (Scenario B) which sweeps 5 domain slots against a research provider, surfaces articles into the Airtable Articles table and a new Research Brain (separate Supabase instance), enriches each article via a Claude end-of-run call, and flags the top 3 as Morning Pick. An ad-hoc R: prefix handler in Scenario A triggers Scenario B immediately for single-job runs.
 
 **What gets built:**
 
-- Articles table (new Airtable table)
+- Research Lens table (new, Airtable) — running context that informs dynamic domain generation
 
-- Scenario B — scheduled research runner
+- Domains table (new, Airtable) — standing domain configs for scheduled sweeps
 
-- R: prefix handler in Scenario A
+- Research Brain (new Supabase instance) — raw catalogue of every research return
 
-- Open Brain push for each new article
+- Scenario B — single-job research runner (webhook trigger)
 
-- Review Gallery view in Airtable
+- Scenario C — daily cron (Schedule → webhook POST to Scenario B)
+
+- R: prefix handler in Scenario A (immediate Scenario B trigger)
+
+- Morning Pick field on Articles table
+
+- Domain linked field on Articles table
+
+- Run ID field on Articles table
+
+**What is explicitly deferred:**
+
+- Magi consumption of daily digest (Phase 4-5)
+
+- Brain Stem → Magi handoff pattern (Phase 4-5)
+
+- Open Brain promotion logic from Airtable content (Phase 4-5)
+
+- Airtable AI enrichment (replaced by Claude end-of-run call)
+
+- Article deduplication across domains (same URL from two domains — acceptable at current volume)
+
+- Exclude Domains field (Perplexity `search_domain_filter` is allowlist only — field is inert for Phase 3)
+
+- Research Brain review and pruning protocol (develop as needed)
+
+- Results Per Run (Perplexity does not expose citation count control — field removed from Domains table; full citation volume is desirable for Research Brain completeness)
 
 ---
 
-## 1. New Airtable Table: Articles
+## 1. New Airtable Tables
 
-**Table ID:** To be created. Add to module reference after setup.
+### 1a. Research Lens Table
 
-**Base ID:** `<<AIRTABLE_BASE_ID>>`
+Free-text running context. Read by Scenario B at the start of each run. Updated by you whenever your focus shifts. No schema constraints — this is a notepad that informs Claude's dynamic domain generation.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| Title | Single line text | Article headline. Perplexity may not return this — derive from URL or leave blank for now. |
-| URL | Single line text | Primary dedup key. One record per URL. |
-| Source Domain | Single line text | Parsed from URL (e.g., `theguardian.com`) |
-| Summary | Long text | Perplexity-synthesized snippet for this citation |
-| Relevance Score | Number | 0.0–1.0. Populated by Airtable AI enrichment (Phase 3 step, not at ingest time) |
-| Published Date | Date | From Perplexity citation metadata if available, else null |
-| Status | Single select | `New`, `Reviewed`, `Saved`, `Dismissed` |
-| Notes | Long text | Manual notes during review |
-| Research Job | Link to Research Jobs | Linked to the job that sourced this article |
-| Tags | Multiple select | Airtable AI enrichment pass (same pattern as Brain Stem — deferred within Phase 3) |
-| Created | Date | Auto via Airtable |
+| Entry | Long text | What you're working on, areas of current focus, directions worth watching |
+| Created | Date | Auto |
+| Active | Checkbox | Scenario B reads only Active entries |
 
-**Rationale for URL as dedup key:** Perplexity returns the same high-authority sources repeatedly across jobs. URL dedup prevents duplicate records when two jobs surface the same article.
+### 1b. Domains Table
+
+Standing domain configurations for the scheduled daily sweep.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Domain Name | Single line text | Human label e.g. "Regenerative Systems" |
+| Prompt | Long text | The actual query sent to the research provider |
+| Recency Window | Single select | 1d, 7d, 30d |
+| Active | Checkbox | Only active domains run on schedule |
+| Last Run | Date | Updated after each run |
+| Next Run | Date | Computed post-run — Daily domains only |
+| Last Run Summary | Long text | Synthesized content from provider |
+
+**Domain slots:**
+
+| Slot | Type | Source |
+| --- | --- | --- |
+| 1–3 | Standing | Fixed configs in Domains table |
+| 4 | Contextual | Claude-generated from Research Lens |
+| 5 | Wildcard | Claude-generated from Research Lens, adjacent/unexpected instruction |
+
+Slots 4 and 5 are generated by a single Claude call at the start of each Scenario B run. They are ephemeral — used only for that run, not stored as Domains records.
+
+### 1c. Research Jobs Table (as-built schema)
+
+Used for ad-hoc R: queries. Created by the R: handler in Scenario A. Frequency = Custom by default on R:-created jobs.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Job Name | Single line text | First ~50 chars of clean_text |
+| Query | Long text | Full clean_text from R: message |
+| Active | Checkbox | true on creation |
+| Frequency | Single select | Custom (R: default), Daily |
+| Recency Window | Single select | 1d, 7d, 30d — default 30d |
+| Relevance Threshold | Number | Future use — inert Phase 3 |
+| Include Domains | Long text | Allowlist for provider filter — optional |
+| Exclude Domains | Long text | Inert for Phase 3 (Perplexity allowlist only) |
+| Language/Region | Single line text | Optional provider filter |
+| Run Now | Checkbox | true on creation, set false post-run |
+| Next Run | Date | Null for Custom jobs |
+| Last Run | Date | Updated post-run |
+| Last Run Summary | Long text | Synthesized content from provider |
+| Articles | Linked record → Articles | Auto-linked via Make |
+
+### 1d. Articles Table (as-built + additions)
+
+| Field | Type | Populated by | Notes |
+| --- | --- | --- | --- |
+| Title | Single line text | Perplexity `search_results[n].title` | At POST time |
+| URL | Single line text | Perplexity `search_results[n].url` | Primary dedup key |
+| Source Domain | Single line text | Parsed from URL | Make Text Parser at POST time |
+| Published Date | Date | Perplexity `search_results[n].date` | At POST time |
+| Thumbnail | URL | — | Not returned by Perplexity — deferred |
+| Summary | Long text | Claude end-of-run call | Per article |
+| Key Points | Long text | Claude end-of-run call | Per article |
+| Category | Single select | Claude end-of-run call | Per article |
+| Tags | Long text | Claude end-of-run call | Per article |
+| Relevance Score | Number | Claude end-of-run call | 0.0–1.0 |
+| Why It Matters | Long text | Claude end-of-run call | Per article |
+| Status | Single select | Default: New | New, Reviewed, Saved, Dismissed, Use |
+| Full Text | Long text | Perplexity `choices[0].message.content` | Domain-level synthesis — one per domain run, shared across all articles from that domain |
+| Citations | Long text | — | Deferred |
+| Dedup Key | Formula | Airtable formula | URL + Published Date |
+| Research Job | Linked record → Research Jobs | R: runs only | Null for scheduled domain runs |
+| Domain | Linked record → Domains | Scheduled runs only | Null for R: runs |
+| Run ID | Single line text | Make Set Variable | Scenario B execution ID — used for end-of-run fetch filter |
+| Morning Pick | Checkbox | Claude end-of-run call | True for top 3 per run |
+| Drafts | Linked record | — | Phase 4-5 |
+
+**Dedup strategy:** Make checks URL + Published Date before creating a record. Same URL with a newer Published Date = new record (updated content). Exact duplicates are skipped.
 
 ---
 
-## 2. Scenario B — Scheduled Research Runner
+## 2. Research Brain (New Supabase Instance)
 
-**Trigger:** Schedule module. Runs daily (or per-job Frequency — see §2.3).
+A raw catalogue of every article Perplexity returns. Separate from Jedi's Open Brain — receives unfiltered volume. Open Brain receives only what Jedidiah deliberately promotes (Phase 4-5).
 
-**Purpose:** Pull all active Research Jobs due to run, call Perplexity for each, create Article records, update job metadata.
+**Schema spec (input for Claude Code setup session):**
 
-### 2.1 Module Sequence
+| Field | Type | Notes |
+| --- | --- | --- |
+| id | UUID | Auto |
+| text | Text | Title + snippet from `search_results[n]` |
+| url | Text | From `search_results[n].url` |
+| source_domain | Text | Parsed from URL |
+| digest_run_id | Text | Scenario B Run ID for traceability |
+| research_job_id | Text | Airtable Research Job or Domain record ID |
+| published_date | Text | From `search_results[n].date` |
+| created_at | Timestamp | Auto |
+| source_tag | Text | `research_digest` default |
+
+**Dedup:** URL + Published Date. Identical entries skipped. Updated content (same URL, new date) ingested as new record.
+
+**Edge Function pattern:** Same as Open Brain `ingest-thought`. Separate Supabase project, separate `x-brain-key`, separate credentials. No shared instance.
+
+**Natural clustering note:** Thematically similar but distinct articles cluster in vector space without dedup — desirable for recurrence detection during future review sessions. Full citation volume is intentional.
+
+**Review and pruning:** Deferred. Develop protocol with Magi + Supabase MCP as needed.
+
+---
+
+## 3. Scenario B — Single-Job Research Runner
+
+**Trigger:** Webhook (called by Scenario C on schedule, or directly by R: handler in Scenario A).
+
+**Mode flag:** A variable passed in the webhook payload determines run mode:
+
+- `mode: "sweep"` — process all active Domains (slots 1–3) + generate slots 4–5
+
+- `mode: "job"` — process a single Research Job record (passed by record ID)
+
+**Provider routing:** If-else/Merge pattern per the if-else-merge-report. Perplexity is condition 1. Additional providers added as conditions. All merge to normalized `search_results[]` + `synthesized_content`. Provider selection driven by a Set Variable at the top of Scenario B.
+
+**Confirmed Perplexity response shape (test call 2026-03-24):**
+
+- `search_results[]` — title, url, date, last_updated, snippet, source. **Use this as iterator source.**
+
+- `citations[]` — URLs only. Do not use as iterator source.
+
+- `choices[0].message.content` — synthesized answer. One per API call, domain-level not per-article.
+
+- Cost per call: ~$0.00534. Five domains daily ≈ $0.80/month.
+
+### 3.1 Module Sequence
 
 ```plain text
-[Schedule Trigger]
+[Webhook Trigger]
     ↓
-[HTTP GET] Search Research Jobs
-    filterByFormula: AND(Active=TRUE(), OR(Run Now=TRUE(), Next Run ≤ NOW()))
+[Tools > Set variable] Run ID = timestamp/UUID
+[Tools > Set variable] Mode = webhook payload mode flag
     ↓
-[Iterator] — one execution per job
+[If-else: mode = sweep]
+  → [HTTP GET] Research Lens — Active entries
+  → [HTTP GET] Active Domains
+  → [Claude] Generate domain 4 (contextual) + domain 5 (wildcard) from Research Lens
+  → Combine into domains array (slots 1–5)
+[If-else: mode = job]
+  → [HTTP GET] Research Job by record ID
+  → Pass as single-item array
+[Merge] → unified jobs/domains array
     ↓
-[HTTP POST] Perplexity API
+[Iterator] — one execution per domain/job
     ↓
-[JSON Parse] Extract citations array
+    [If-else: provider routing]
+      → Condition 1: Perplexity → HTTP POST → search_results[]
+      → Condition 2: Provider B → HTTP POST → normalize to same shape
+    [Merge] → normalized search_results[] + synthesized_content
     ↓
-[Iterator] — one execution per citation
+    [Iterator] — one execution per search_result
+        ↓
+        [HTTP GET] Articles dedup check (URL + Published Date)
+        ↓
+        [Filter] Not found in Articles
+        ↓
+        [HTTP POST] Create Article record (including Run ID, Domain or Research Job link)
+        ↓
+        [HTTP POST] Research Brain ingest (fire-and-forget)
     ↓
-[HTTP GET] Articles — search by URL (dedup check)
+    [HTTP PATCH] Domain or Research Job — Last Run, Last Run Summary
+    [HTTP PATCH] Domain — Next Run (conditional typed date, sweep mode only)
+    [HTTP PATCH] Research Job — Run Now = false (job mode only)
     ↓
-[Filter] URL does not exist in Articles
+[HTTP GET] Today's Articles — filter by Run ID
     ↓
-[HTTP POST] Create Article record
+[Claude] End-of-run enrichment call — all articles in this run
     ↓
-[HTTP POST] Open Brain ingest (fire-and-forget)
+[Iterator] — one PATCH per article
     ↓
-[HTTP PATCH] Research Job — update Last Run, Next Run, Last Run Summary, uncheck Run Now
+[HTTP PATCH] Article — enrichment fields + Morning Pick
 ```
 
-### 2.2 Perplexity API Call
+### 3.2 Provider API Call — Perplexity
 
-**URL:** `https://api.perplexity.ai/chat/completions` **Method:** POST **Auth header:** `Authorization: Bearer <<PERPLEXITY_API_KEY>>`
-
-**Request body template:**
+**URL:** `https://api.perplexity.ai/chat/completions` **Method:** POST **Auth:** `Authorization: Bearer <<PERPLEXITY_API_KEY>>`
 
 ```json
 {
@@ -98,120 +250,141 @@ Phase 3 builds automated research on top of the existing Brain Stem pipeline. Pe
   "messages": [
     {
       "role": "user",
-      "content": "<<job.Query>>"
+      "content": "<<domain.Prompt or job.Query>>"
     }
   ],
-  "search_domain_filter": <<job.Include Domains — parse to array, omit if empty>>,
-  "search_recency_filter": "<<job.Recency Window — map: 30d→month, 7d→week, 1d→day>>",
+  "search_recency_filter": "<<Recency Window — map: 1d→day, 7d→week, 30d→month>>",
   "return_citations": true,
   "max_tokens": 1024
 }
 ```
 
-**Response shape (relevant fields):**
+**Note:** `search_domain_filter` omitted by default. Include Domains field populates this as an array if present. Exclude Domains is inert — known Perplexity limitation.
 
-```json
-{
-  "choices": [
-    {
-      "message": {
-        "content": "Synthesized answer text with inline [1][2] citation markers"
-      }
-    }
-  ],
-  "citations": [
-    "https://example.com/article-1",
-    "https://example.com/article-2"
-  ]
-}
-```
+**Iterator source:** `search_results[]` not `citations[]`.
 
-**Note:** Perplexity returns URLs in `citations[]` and synthesized text in `choices[0].message.content`. There is no per-citation title or summary in the raw response — the synthesized content references citations by index. For Phase 3, store the full synthesized content as `Last Run Summary` on the job, and store each citation URL as an Article record with a blank Summary (Airtable AI enrichment fills this later). If per-article summaries are needed at ingest time, a second Claude call can extract them — defer until usage shows it's necessary.
-
-**Field mapping: Recency Window → Perplexity filter**
-
-| Airtable value | Perplexity value |
-| --- | --- |
-| `1d` | `day` |
-| `7d` | `week` |
-| `30d` | `month` |
-| anything else | omit filter |
-
-### 2.3 Frequency → Next Run Calculation
-
-After each job runs, compute Next Run based on Frequency:
-
-| Frequency value | Next Run |
-| --- | --- |
-| Daily | now + 1 day |
-| Weekly | now + 7 days |
-| Custom | <<UNKNOWN — needs field clarification>> |
-
-**Open question:** The Research Jobs table has a `Frequency` field with a `Custom` value visible. Clarify what Custom means — fixed interval in days? A separate interval field? This affects how Next Run is computed after each run.
-
-### 2.4 Dedup Check
-
-Before creating an Article record:
-
-1. GET Articles with `filterByFormula: URL="<<citation_url>>"`
-
-1. If any records returned → skip. Filter passes only on empty result.
-
-**Airtable GET for dedup:**
+### 3.3 Dedup Check
 
 ```plain text
 GET https://api.airtable.com/v0/<<AIRTABLE_BASE_ID>>/<<ARTICLES_TABLE_ID>>
-  ?filterByFormula=URL%3D%22<<encoded_url>>%22
+  ?filterByFormula=AND(URL="<<url>>",{Published Date}="<<date>>")
   &maxRecords=1
 ```
 
-### 2.5 Article POST Body
+Filter passes only on empty result.
+
+### 3.4 Article POST Body
 
 ```json
 {
   "fields": {
-    "Title": "",
-    "URL": "<<citation_url>>",
-    "Source Domain": "<<parsed from URL>>",
+    "Title": "<<search_results[n].title>>",
+    "URL": "<<search_results[n].url>>",
+    "Source Domain": "<<parsed from URL — Text Parser: ^https?://(?:www\\.)?([^/]+)>>",
+    "Published Date": "<<search_results[n].date>>",
+    "Full Text": "<<choices[0].message.content>>",
     "Status": "New",
+    "Run ID": "<<Run ID variable>>",
+    "Domain": ["<<domain_record_id>>"],
     "Research Job": ["<<job_record_id>>"]
   }
 }
 ```
 
-Source Domain can be parsed in Make using a Text Parser regex: `^https?://(?:www\.)?([^/]+)`.
+Note: Domain and Research Job are mutually exclusive per run — one will be null. Use two separate Article POST modules behind a filter on the mode flag — one for sweep mode (Domain link populated, Research Job omitted), one for job mode (Research Job link populated, Domain omitted). Same pattern as typed-field conditional PATCHes in Phase 1/2. Do not include an empty linked record field in the POST body — Airtable rejects it.
 
-### 2.6 Research Job PATCH (post-run update)
+### 3.5 Research Brain POST
+
+Fire-and-forget. After Article POST, before Domain/Job PATCH.
+
+```json
+{
+  "text": "<<search_results[n].title>> <<search_results[n].snippet>>",
+  "url": "<<search_results[n].url>>",
+  "source_domain": "<<parsed from URL>>",
+  "digest_run_id": "<<Run ID>>",
+  "research_job_id": "<<domain_or_job_record_id>>",
+  "published_date": "<<search_results[n].date>>",
+  "source_tag": "research_digest"
+}
+```
+
+**Auth:** `x-brain-key: <<RESEARCH_BRAIN_ACCESS_KEY>>` **Endpoint:**`https://<<RESEARCH_BRAIN_PROJECT_REF>>.supabase.co/functions/v1/ingest-thought`
+
+### 3.6 Domain / Job PATCH (post-run)
 
 ```json
 {
   "fields": {
     "Last Run": "<<now — ISO8601>>",
-    "Last Run Summary": "<<choices[0].message.content>>",
-    "Run Now": false
+    "Last Run Summary": "<<choices[0].message.content>>"
   }
 }
 ```
 
-Next Run is a typed date field → isolate in a separate conditional PATCH (same pattern as Brain Stem typed-field guards).
+Next Run is a typed date field — isolate in a separate conditional PATCH. Only fires for Daily domains in sweep mode.
+
+Run Now = false PATCH fires for Research Jobs in job mode only.
+
+### 3.7 End-of-Run Fetch
+
+HTTP GET Articles filtered by Run ID before Claude enrichment call:
+
+```plain text
+GET https://api.airtable.com/v0/<<AIRTABLE_BASE_ID>>/<<ARTICLES_TABLE_ID>>
+  ?filterByFormula={Run ID}="<<Run ID>>"
+```
+
+Returns all articles created in this run. Passed as input to Claude enrichment call.
+
+### 3.8 Claude End-of-Run Enrichment Call
+
+One call per Scenario B run. Reviews all articles in this run. Maximizes token floor.
+
+**Input:** All articles from the Run ID fetch — title, URL, snippet (from Full Text), domain prompt or job query that sourced them.
+
+**Output per article:**
+
+- Summary (2–3 sentences)
+
+- Key Points (bullet form)
+
+- Why It Matters (1–2 lines — significance to the domain query and broader context)
+
+- Category
+
+- Tags (comma-separated)
+
+- Relevance Score (0.0–1.0)
+
+- Morning Pick (true for top 3 only)
+
+**Follow with:** Iterator — one Article PATCH per record writing enrichment fields.
+
+**Cost:** ~$0.10–0.30/run at Sonnet. ~$3/month.
 
 ---
 
-## 3. R: Prefix Handler (Scenario A Extension)
+## 4. Scenario C — Daily Cron
 
-**Trigger:** Message in #brain-stem starts with `R:`
+Two modules only.
 
-**Purpose:** Create a Research Job record from Slack and optionally trigger immediate research.
+| Module # | Type | Purpose |
+| --- | --- | --- |
+| 1 | Schedule | 24hr trigger |
+| 2 | HTTP POST | Webhook to Scenario B with `mode: "sweep"` |
 
-**Design decision — two options:**
+---
 
-**Option A (queue only):** R: creates a Research Job with `Run Now = true`. Scenario B picks it up on next scheduled run (could be within minutes if Scenario B runs frequently).
+## 5. R: Prefix Handler (Scenario A Extension)
 
-**Option B (immediate):** R: creates the Research Job AND calls Perplexity inline within Scenario A, then creates Article records immediately. Slack confirmation includes article count.
+**Behavior:** Immediate. Fires Scenario B directly via webhook with `mode: "job"` and the Research Job record ID. Does not queue.
 
-**Recommendation: Option A.** Keeps Scenario A fast and stateless. Scenario B can be scheduled every 15–30 min for near-real-time response. Option B adds significant complexity to Scenario A and creates a slow path for every R: message.
+**Frequency on R:-created jobs:** Default = Custom. No Next Run calculation.
 
-### 3.1 Module Sequence (Option A)
+**Reusable mechanism:** Same webhook trigger pattern serves the content creation lab and any future on-demand research context.
+
+### 5.1 Module Sequence (Scenario A addition)
 
 ```plain text
 [Existing webhook + bot filter]
@@ -220,152 +393,103 @@ Next Run is a typed date field → isolate in a separate conditional PATCH (same
     ↓
 [Tools > Set variable] clean_text = strip "R:" prefix
     ↓
-[HTTP POST] Create Research Job record
+[HTTP POST] Create Research Job
+    (Job Name: first 50 chars, Query: clean_text,
+     Active: true, Frequency: Custom, Run Now: true,
+     Recency Window: 30d default)
     ↓
-[HTTP POST] Create Inbox Log record (Status=Filed, Filed To=Research Jobs)
+[HTTP POST] Create Inbox Log record
+    (Status=Filed, Filed To=Research Jobs,
+     Source Link: Slack message permalink)
     ↓
-[HTTP POST] Slack reply — in-thread confirmation
-```
-
-**Research Job POST body (R: route):**
-
-```json
-{
-  "fields": {
-    "Job Name": "<<clean_text — first ~50 chars>>",
-    "Query": "<<clean_text>>",
-    "Active": true,
-    "Run Now": true,
-    "Recency Window": "30d"
-  }
-}
+[HTTP POST] Webhook → Scenario B
+    (mode: "job", record_id: <<Research Job record ID>>)
+    ↓
+[HTTP POST] Slack in-thread confirmation
 ```
 
 **Slack confirmation:**
 
 ```plain text
 Research job queued: "<<clean_text>>"
-It'll run within 30 minutes. Results → Articles table.
+Running now. Results → Articles table.
 ```
 
-### 3.2 Placement in Scenario A
-
-Add R: as a new route off the existing prefix router, before the bot filter passes to BD classification. Route ordering:
-
-1. PRO: (existing)
-
-1. R: (new)
-
-1. fix: (existing — threaded replies only)
-
-1. BD: / fallthrough (existing)
-
----
-
-## 4. Open Brain Integration
-
-Each new Article record gets pushed to Open Brain (fire-and-forget, same pattern as Brain Stem captures).
-
-**Module placement:** After Article POST, before Research Job PATCH.
-
-**Body:**
-
-```json
-{
-  "text": "<<URL>> <<Title if non-empty>>",
-  "source": "brain_stem",
-  "destination": "research_jobs",
-  "confidence": 1.0,
-  "destination_record_id": "<<job_record_id>>",
-  "classified_name": "<<URL>>"
-}
-```
-
-**URL:** `https://<<SUPABASE_PROJECT_REF>>.supabase.co/functions/v1/ingest-thought` **Header:** `x-brain-key: <<OPEN_BRAIN_ACCESS_KEY>>`
-
----
-
-## 5. Airtable: Review Gallery View
-
-Manual step — no Make involvement.
-
-In the Articles table, create a Gallery view:
-
-- Filter: `Status = New`
-
-- Card title: Title (or URL if title empty)
-
-- Card fields: Source Domain, Research Job, Created
-
-- Sort: Created DESC
-
-This is the triage interface. Jedidiah reviews New articles, sets Status to Saved or Dismissed.
-
----
-
-## 6. Airtable AI Enrichment
-
-Airtable AI can auto-populate Summary, Relevance Score, and Tags per article. This requires:
-
-- An Airtable AI field for each (configured per-table in Airtable UI)
-
-- A prompt referencing URL and Research Job query
-
-**Deferred within Phase 3** — build and test the ingest pipeline first. Add AI enrichment in a second pass once article volume is real.
-
-**When ready, the enrichment prompt pattern:**
-
-```plain text
-The following article was surfaced by a research query: "<<Research Job.Query>>"
-Article URL: <<URL>>
-
-Score its relevance to the query (0.0–1.0) and write a 2-sentence summary.
-Return JSON: { "relevance_score": 0.0, "summary": "..." }
-```
-
----
-
-## 7. Module Reference (Scenario B — new)
-
-Scenario B is a new Make scenario. Module numbers start fresh.
+### 5.2 Scenario A Module Numbers (R: route)
 
 | Module # | Type | Purpose |
 | --- | --- | --- |
-| 1 | Schedule | Trigger (daily or every N hours — TBD) |
-| 2 | HTTP GET | Search Research Jobs (Active + due) |
-| 3 | Iterator | Per job |
-| 4 | HTTP POST | Perplexity API call |
-| 5 | JSON Parse | Extract citations + synthesized content |
-| 6 | Iterator | Per citation URL |
-| 7 | HTTP GET | Articles dedup check |
-| — | Filter | URL not found |
-| 8 | HTTP POST | Create Article record |
-| 9 | HTTP POST | Open Brain ingest (fire-and-forget) |
-| 10 | HTTP PATCH | Research Job — Last Run, Last Run Summary, Run Now=false |
-| 11 | HTTP PATCH | Research Job — Next Run (conditional, typed date) |
-
-**Scenario A additions (R: route):**
-
-| Module # | Type | Purpose |
-| --- | --- | --- |
-| ~290 | Tools > Set variable | Strip R: prefix → clean_text |
-| ~291 | HTTP POST | Create Research Job (Run Now=true) |
-| ~292 | HTTP POST | Create Inbox Log record (Status=Filed, Filed To=Research Jobs) |
-| ~293 | HTTP POST | Slack in-thread confirmation |
-
-Module numbers ~290+ to avoid collision with existing modules. Assign during build.
+| ~302 | Tools > Set variable | Strip R: prefix → clean_text |
+| ~303 | HTTP POST | Create Research Job |
+| ~304 | HTTP POST | Create Inbox Log (with Source Link) |
+| ~305 | HTTP POST | Webhook → Scenario B (mode: job) |
+| ~306 | HTTP POST | Slack in-thread confirmation |
 
 ---
 
-## 8. Open Questions (Resolve Before Build)
+## 6. Morning Pick — Interface for Phase 4-5
 
-1. **Frequency/Custom field** — What does `Custom` mean in the Frequency field? Is there a separate interval field, or is it a fixed value? Affects Next Run calculation.
+Morning Pick = true on top 3 articles per run is the interface between Phase 3 and Phase 4-5 digest delivery. Phase 3 does not attempt to deliver the digest to Magi or any other consumer.
 
-1. **Scenario B schedule interval** — How often should the runner fire? Daily is simple; every 30 min enables near-real-time R: response. Affects cost negligibly at current volume.
+Phase 4-5 decides:
 
-1. **Article Title** — Perplexity doesn't return per-citation titles. Accept blank Title at ingest (filled manually or via Airtable AI), or add a Claude call to extract title from URL? Recommendation: blank for now.
+- Whether Magi pulls Morning Pick articles via Airtable read
 
-1. **Exclude Domains** — Perplexity supports `search_domain_filter` but only as an allowlist, not a blocklist, in some model versions. Verify current sonar model supports exclusion; if not, the Exclude Domains field is inert for Phase 3.
+- Whether a scheduled message posts to #magination
+
+- Whether promoted articles flow to Open Brain
+
+- What the broader Brain Stem → Magi handoff pattern looks like
+
+Phase 3 sets the flag. Phase 4-5 reads it.
+
+---
+
+## 7. Open Brain
+
+Not touched by Scenario B or C. No automatic ingestion of research articles into Open Brain.
+
+Promotion from Articles to Open Brain is a deliberate human action, designed in Phase 4-5 as part of the broader pipeline content promotion architecture.
+
+---
+
+## 8. Module Reference
+
+### Scenario B
+
+| Module # | Type | Purpose |
+| --- | --- | --- |
+| 1 | Webhook | Trigger (receives mode flag + optional record ID) |
+| 2 | Tools > Set variable | Run ID (timestamp/UUID) |
+| 3 | Tools > Set variable | Mode flag |
+| 4 | If-else | Mode: sweep vs job |
+| 5a | HTTP GET | Research Lens (sweep) |
+| 5b | HTTP GET | Active Domains (sweep) |
+| 5c | Claude | Generate domain slots 4–5 (sweep) |
+| 5d | HTTP GET | Research Job by record ID (job) |
+| — | Merge | Unified jobs/domains array |
+| 6 | Iterator | Per domain/job |
+| 7 | If-else | Provider routing |
+| 8 | HTTP POST | Perplexity call (condition 1) |
+| 9 | HTTP POST | Provider B (condition 2) |
+| — | Merge | Normalized search_results[] + synthesized_content |
+| 10 | Iterator | Per search_result |
+| 11 | HTTP GET | Articles dedup check |
+| — | Filter | Not found |
+| 12 | HTTP POST | Create Article record |
+| 13 | HTTP POST | Research Brain ingest (fire-and-forget) |
+| 14 | HTTP PATCH | Domain/Job — Last Run, Last Run Summary |
+| 15 | HTTP PATCH | Domain — Next Run (conditional typed date) |
+| 16 | HTTP PATCH | Research Job — Run Now = false (job mode only) |
+
+**Build note (modules 14–16):** These PATCHes wire off the inner iterator's (module 10) output bundle after it closes — not off the outer domain iterator. In Make, route them from the last module inside the inner iterator once the inner iterator has finished processing all search_results for that domain. | 17 | HTTP GET | Articles by Run ID (pre-enrichment fetch) | | — | Filter | `17.Data.records[1]` Exists — skip enrichment if zero new articles (all deduped) | | 18 | Claude | End-of-run enrichment call | | 19 | Iterator | Per article | | 20 | HTTP PATCH | Article — enrichment fields + Morning Pick |
+
+### Scenario C
+
+| Module # | Type | Purpose |
+| --- | --- | --- |
+| 1 | Schedule | 24hr trigger |
+| 2 | HTTP POST | Webhook → Scenario B (mode: sweep) |
 
 ---
 
@@ -373,90 +497,96 @@ Module numbers ~290+ to avoid collision with existing modules. Assign during bui
 
 | Step | What | Prereq |
 | --- | --- | --- |
-| 1 | Create Articles table in Airtable (schema per §1) | — |
-| 2 | Add Articles table ID to module reference | Step 1 |
-| 3 | Build Scenario B skeleton (Schedule → Research Jobs GET → Iterator) | Step 2 |
-| 4 | Add Perplexity call + JSON parse | Step 3, Perplexity key |
-| 5 | Add citation iterator + dedup check + Article POST | Step 4 |
-| 6 | Add Open Brain push | Step 5 |
-| 7 | Add Research Job PATCH (Last Run + Next Run) | Step 5 |
-| 8 | Seed one Research Job, run manually, verify Article records created | Step 7 |
-| 9 | Add R: route to Scenario A | Step 8 |
-| 10 | Create Review Gallery view in Airtable | Step 1 |
-| 11 | Airtable AI enrichment (deferred — second pass) | Step 8 |
+| 1 | Stand up Research Brain Supabase instance (schema per §2) | Claude Code session |
+| 2 | Create Research Lens table in Airtable | — |
+| 3 | Create Domains table in Airtable | — |
+| 4 | Add Morning Pick, Run ID, Domain fields to Articles table | — |
+| 5 | Build Scenario B skeleton (Webhook → Set Variables → If-else mode → Merge) | Steps 1–4 |
+| 6 | Add sweep branch (Research Lens GET → Domains GET → Claude domain generation) | Step 5 |
+| 7 | Add If-else/Merge provider routing + Perplexity call | Step 6, Perplexity key |
+| 8 | Add citation iterator + dedup check + Article POST | Step 7 |
+| 9 | Add Research Brain POST | Step 8 |
+| 10 | Add Domain/Job PATCH (Last Run, Last Run Summary, Next Run, Run Now) | Step 8 |
+| 11 | Add Run ID fetch + Claude enrichment call + Article PATCH iterator | Step 10 |
+| 12 | Build Scenario C (Schedule → webhook to Scenario B, mode: sweep) | Step 5 |
+| 13 | Seed one Domain record, run Scenario C manually, verify end-to-end | Step 12 |
+| 14 | Add R: route to Scenario A + immediate webhook to Scenario B (mode: job) | Step 13 |
+| 15 | Create Review Gallery view in Airtable (Articles, Status = New, sort: Created DESC) | Step 4 |
 
 ---
 
-## 10. Deferred (Not Phase 3)
+## 10. Open Questions (All Resolved)
 
-- AI enrichment (Summary, Relevance Score, Tags) — second pass within Phase 3 or Phase 4
+1. ~~Frequency/Custom~~ — Custom = single ad-hoc run. Daily = 24hr recurring. ✅
 
-- Article deduplication across jobs (same URL sourced by two different jobs — currently creates two records linked to different jobs; acceptable at current volume)
+1. ~~Scenario B schedule interval~~ — 24hr via Scenario C. ✅
 
-- CAL: route (Phase 4)
+1. ~~Article Title~~ — Available from `search_results[n].title`. ✅
 
-- Perplexity fallback (none designed — if Perplexity is down, job is skipped, Next Run is not updated, it retries next scheduled run)
+1. ~~Exclude Domains~~ — Perplexity allowlist only. Field inert Phase 3. ✅
+
+1. ~~Provider response shape~~ — Confirmed via test call. Use `search_results[]`. ✅
+
+1. ~~Open Brain ingestion~~ — Not Phase 3. Research Brain receives all. Open Brain promotion Phase 4-5. ✅
+
+1. ~~Morning digest delivery~~ — Morning Pick flag is the interface. Delivery Phase 4-5. ✅
+
+1. ~~Dual-trigger conflict~~ — Resolved via Scenario C pattern. ✅
+
+1. ~~Linked record typing~~ — Resolved via separate Domain and Research Job fields on Articles. ✅
+
+1. ~~Results Per Run~~ — Removed. Full citation volume is desirable. ✅
+
+---
+
+## 11. Deferred Items
+
+1. Magi consumption of daily digest — Phase 4-5
+
+1. Open Brain promotion from Articles — Phase 4-5
+
+1. Brain Stem → Magi handoff pattern — Phase 4-5
+
+1. Article deduplication across domains — acceptable at current volume
+
+1. Exclude Domains blocklist — Perplexity limitation; revisit with alternative provider
+
+1. Research Brain review and pruning protocol — develop with Magi + Supabase MCP as needed
+
+1. Thumbnail population — not returned by Perplexity
+
+1. Citations field population — deferred
+
+1. R: mechanism reuse for content creation lab — Phase 4-5
+
+1. Relevance Threshold field on Research Jobs — inert Phase 3, future provider use
+
+---
+
+## 12. Contract Updates Required (Carry Forward)
+
+**🔴 Must resolve before or during Phase 3:**
+
+- CONTRACT §9 — add Domains, Research Lens, and Research Jobs schemas (Research Jobs schema now defined in §1c of this doc)
+
+- CONTRACT §3.5 Memory Interface — add Research Brain as a new memory instance
+
+- Security Placeholders — add `<<RESEARCH_BRAIN_PROJECT_REF>>` and `<<RESEARCH_BRAIN_ACCESS_KEY>>`
+
+- INV-001 compliance on R: route — ✅ resolved in §5.1 (Inbox Log POST included)
+
+**🟡 Additive updates:**
+
+- CONTRACT §13 — add Phase 3 scope definition
+
+- contracts/spec — **full rewrite required** (not a version bump). Current state is v0.2.0. Gaps: R: route currently shows `llm_mode: extract_only` and `prompt_id: research_extract_v1` — Phase 3 R: route calls Perplexity not Claude; fix: route shows `implementation: scaffolded` — should be `implemented` (live since Phase 2); Memory Interface and Supabase provider missing entirely; Articles, Research Jobs, Domains table definitions absent.
+
+- CONTRACT version bump to v0.6.0 (new tables, new memory instance)
 
 ---
 
 ## Next Phase
 
-[Phase 4: Content Synthesis](https://www.notion.so/25f0383da86e40c5ab833bf28f7185ad)
+[Phase 4: Content Synthesis](https://www.notion.so/25f0383da86e40c5ab833bf28f7185ad) — Magi consumption of research digest, Open Brain promotion architecture, Brain Stem → Magi handoff pattern, content creation lab, Morning Pick delivery to #magination.
 
-**Child page:** Phase 3 review
----
-### 🔴 Contract violations / conflicts
-**1. Airtable Base ID in plain text — violates CONTRACT §11**[[1]](https://www.notion.so/CONTRACT-Brain-Stem-cb5393105c784cc3969571a898b4f81e)
-§11 explicitly says: *"Never publish in Git mirror or public docs: Airtable Base IDs, Table IDs (treat as sensitive metadata)."* The Phase 3 doc exposes `appuT9wJR9eKmVfyU` in §1. Should be `<<AIRTABLE_BASE_ID>>`.
-**2. No Inbox Log record on R: capture — violates §10 invariant**[[1]](https://www.notion.so/CONTRACT-Brain-Stem-cb5393105c784cc3969571a898b4f81e)
-CONTRACT §10 invariant: *"Every invocation of the Storage Interface must produce exactly one Inbox Log record."* The R: handler in Scenario A (§3.1) creates a Research Job directly but never creates an Inbox Log entry. PRO: also bypasses classification but still creates an Inbox Log. R: should follow the same pattern — or the invariant needs a documented exception.
-**3. Open Brain payload shape deviates from Memory Interface (§3.5)**[[1]](https://www.notion.so/CONTRACT-Brain-Stem-cb5393105c784cc3969571a898b4f81e)
-CONTRACT §3.5 Memory Interface defines flat fields: `text`, `source`, `destination`, `confidence`, `classified_name`, `record_id`. Phase 3 §4 wraps them in a `metadata` object and introduces new values:
-- `source: "brain_stem_research"` — not defined in CONTRACT (only `"brain_stem"` and `"brain_stem_fix"` are)
-- `destination: "articles"` — not in the CONTRACT entity list
-- `research_job_id` replaces the standard `record_id` field
-Either the Phase 3 payload needs to conform to the existing interface, or the CONTRACT Memory Interface needs a minor bump to accommodate the research source.
----
-### 🟡 Missing from CONTRACT — needs additive updates
-**4. Articles table not in §9 Data Contracts**[[1]](https://www.notion.so/CONTRACT-Brain-Stem-cb5393105c784cc3969571a898b4f81e)
-Articles is a brand new entity. CONTRACT §9 defines Inbox Log, Projects, People, Ideas, Admin, Events. Articles needs to be added — schema is well-defined in Phase 3 §1, just needs to be promoted to the contract.
-**5. Research Jobs table not in §9 either**
-Research Jobs is referenced as the R: destination in §7 but its schema never appears in §9. This may have been an oversight from the original contract — it was always planned but never schematized.
-**6. CONTRACT §13 needs Phase 3 scope definition**[[1]](https://www.notion.so/CONTRACT-Brain-Stem-cb5393105c784cc3969571a898b4f81e)
-§13 currently says "Phase 3–9: Not yet implemented" with no scope breakdown. When Phase 3 moves to implementation, §13 needs a scope entry similar to Phase 1 and Phase 2.
----
-### 🟡 Spec staleness
-**7. contracts/spec is at v0.2.0, CONTRACT is at v0.4.0**[[2]](https://www.notion.so/contracts-spec-Brain-Stem-98d781fe40ed4e31a566f0d8886325fc)
-The spec hasn't been updated since the Memory Interface, fix: route, and Open Brain changes. Relevant gaps:
-- R route shows `llm_mode: "extract_only"` and `prompt_id: "research_extract_v1"` — but Phase 3 doesn't use Claude for the R: route at all; it calls Perplexity directly. The spec's R route definition needs revision.
-- fix route shows `implementation: "scaffolded"` — should be `"implemented"` (live since Phase 2).
-- No Memory Interface or Supabase provider in spec.
-- No Articles or Research Jobs table definitions.
----
-### 🟡 Internal doc issues
-**8. Duplicate/stale content at bottom of page**
-The page contains TWO documents spliced together. Everything below the second `---` + YAML block (dated `2026-02-18`, `contract_version: "0.2.0"`) is the original placeholder template — stale overview, empty "As-Designed" and "As-Built" sections, a completion checklist that doesn't match the architecture above it. Should be deleted or clearly superseded.
-**9. YAML header references contract v0.3.0**
-The top YAML says `contract_version: "0.3.0"` but CONTRACT is at v0.4.0. Should be `"0.4.0"`.
-**10. Contract References section (bottom) references v0.2.0**
-The `See: CONTRACT (Brain-Stem) v0.2.0` line is stale — should reference v0.4.0.
----
-### 🟢 Aligned / well-designed
-- **R: prefix routing** matches CONTRACT §7 semantics (prefix → Research Jobs, scaffolded Phase 3) ✅
-- **Option A recommendation** (queue-only R: handler) is the right call — keeps Scenario A fast and stateless, consistent with the existing route pattern ✅
-- **Perplexity API usage** aligns with CONTRACT §2 scope and §3b provider mapping ✅
-- **URL dedup pattern** is sound — prevents citation duplication across jobs ✅
-- **Fire-and-forget Open Brain push** follows the established pattern from Phase 1/2 (once payload shape is reconciled) ✅
-- **Build sequence** is well-ordered with sensible prereqs ✅
-- **Deferred items** are clearly scoped and reasonable ✅
----
-### Summary — action items before build
-| # | Action | Severity |
-| --- | --- | --- |
-| 1 | Replace Base ID with `<<AIRTABLE_BASE_ID>>` placeholder | 🔴 Security |
-| 2 | Add Inbox Log creation to R: route (or document exception) | 🔴 Invariant |
-| 3 | Reconcile Open Brain payload with Memory Interface | 🔴 Contract deviation |
-| 4 | Add Articles + Research Jobs schemas to CONTRACT §9 | 🟡 Additive |
-| 5 | Update contracts/spec to v0.4.0 | 🟡 Staleness |
-| 6 | Delete stale placeholder content at bottom of page | 🟡 Hygiene |
-| 7 | Fix YAML contract_version to 0.4.0 | 🟡 Reference |
+[Phase 4: Content Synthesis](https://www.notion.so/25f0383da86e40c5ab833bf28f7185ad)
